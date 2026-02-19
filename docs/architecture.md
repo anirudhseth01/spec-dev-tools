@@ -330,7 +330,79 @@ for chunk in chunks:
 
 ---
 
-## 6. File Structure
+## 6. CodingAgent Design
+
+The CodingAgent is the primary code generation agent, designed with a "skeleton-first" approach.
+
+### Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Scope | Skeleton-first | Generate interfaces, then fill implementations |
+| Context | Full relevant files | Give agent complete context of related code |
+| Ambiguity | Hybrid | Ask critical questions, assume minor ones |
+| Languages | Single agent + plugins | Language-agnostic with plugin support |
+
+### Generation Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PHASE 1: SKELETON                             │
+│  Generate interfaces, types, signatures (no implementations)     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   PHASE 2: AMBIGUITY CHECK                       │
+│  Critical → ASK user  |  Minor → ASSUME with documentation      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  PHASE 3: CONTEXT BUILD                          │
+│  Gather full content of dependencies, siblings, type files      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  PHASE 4: IMPLEMENTATION                         │
+│  Fill in method bodies, handle errors, add logging              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  PHASE 5: VALIDATION                             │
+│  Syntax check, write files if valid                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Language Plugins
+
+```
+CodingAgent
+    │
+    ▼
+PluginRegistry
+    ├── PythonPlugin    (pytest, snake_case, Google docstrings)
+    ├── TypeScriptPlugin (jest, camelCase, JSDoc)
+    └── (extensible)
+```
+
+### Ambiguity Categories
+
+**Critical (ALWAYS ASK):**
+- Security, authentication, authorization
+- Data persistence, external APIs
+- Breaking changes, payment, compliance
+
+**Minor (ASSUME with docs):**
+- Variable naming, error messages
+- Log levels, docstring style
+- Import ordering, code formatting
+
+---
+
+## 7. File Structure
 
 ```
 src/
@@ -345,6 +417,19 @@ src/
 │   ├── engine.py              # Loads and validates rules
 │   └── validators.py          # Built-in validation functions
 │
+├── llm/
+│   ├── client.py              # LLM client interface
+│   └── mock_client.py         # Mock client for testing
+│
 └── agents/
-    └── base.py                # AgentContext with block/rules support
+    ├── base.py                # AgentContext with block/rules support
+    └── coding/
+        ├── agent.py           # CodingAgent implementation
+        ├── context_builder.py # Builds code context for LLM
+        ├── ambiguity.py       # Ambiguity detection and resolution
+        └── plugins/
+            ├── base.py        # Plugin interface
+            ├── registry.py    # Plugin registry
+            ├── python_plugin.py
+            └── typescript_plugin.py
 ```
