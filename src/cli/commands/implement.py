@@ -153,12 +153,19 @@ def implement(
 
 
 def _get_llm_client(model: str, verbose: bool):
-    """Get LLM client instance."""
+    """Get LLM client instance.
+
+    Prefers Claude Code CLI (uses your existing authentication) over API.
+    """
     try:
-        from src.llm.client import ClaudeClient
+        from src.llm.client import get_llm_client
         if verbose:
-            console.print(f"[dim]Using LLM model: {model}[/dim]")
-        return ClaudeClient(model=model)
+            console.print(f"[dim]Initializing LLM client (model: {model})...[/dim]")
+        client = get_llm_client(prefer_claude_code=True, model=model)
+        if verbose:
+            client_type = type(client).__name__
+            console.print(f"[dim]Using {client_type}[/dim]")
+        return client
     except ImportError:
         console.print("[yellow]Warning:[/yellow] LLM client not available, using mock")
         try:

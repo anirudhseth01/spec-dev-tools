@@ -426,12 +426,17 @@ def _detect_framework(project_path: Path) -> str:
 
 
 def _get_llm_client(verbose: bool):
-    """Get LLM client."""
+    """Get LLM client.
+
+    Prefers Claude Code CLI (uses your existing authentication) over API.
+    """
     try:
-        from src.llm.client import ClaudeClient
+        from src.llm.client import get_llm_client
+        client = get_llm_client(prefer_claude_code=True)
         if verbose:
-            console.print("[dim]Using LLM for test generation...[/dim]")
-        return ClaudeClient()
+            client_type = type(client).__name__
+            console.print(f"[dim]Using {client_type} for test generation...[/dim]")
+        return client
     except Exception as e:
         if verbose:
             console.print(f"[yellow]Warning:[/yellow] LLM not available: {e}")

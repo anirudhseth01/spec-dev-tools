@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -156,3 +157,155 @@ class ClaudeClient(LLMClient):
         except Exception:
             # Fallback to rough estimate
             return len(text) // 4
+
+
+class ClaudeCodeClient(LLMClient):
+    """LLM client that uses the Claude Code CLI.
+
+    This client shells out to the `claude` CLI command, allowing spec-dev-tools
+    to use the user's existing Claude Code authentication instead of requiring
+    a separate API key.
+    """
+
+    def __init__(self, model: str | None = None, timeout: int = 300):
+        """Initialize Claude Code client.
+
+        Args:
+            model: Optional model override (uses Claude Code default if not set).
+            timeout: Command timeout in seconds (default 5 minutes).
+        """
+        self.model = model
+        self.timeout = timeout
+        self._verify_claude_cli()
+
+    def _verify_claude_cli(self) -> None:
+        """Verify that claude CLI is available."""
+        try:
+            result = subprocess.run(
+                ["claude", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                raise RuntimeError("claude CLI returned non-zero exit code")
+        except FileNotFoundError:
+            raise RuntimeError(
+                "claude CLI not found. Install Claude Code: "
+                "https://docs.anthropic.com/claude-code"
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("claude CLI timed out")
+
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+    ) -> LLMResponse:
+        """Generate a response using Claude Code CLI.
+
+        Uses the --print flag for non-interactive output.
+        Note: max_tokens and temperature are ignored as Claude CLI
+        handles these internally.
+        """
+        try:
+            # Build command
+            cmd = ["claude", "--print"]
+
+            if self.model:
+                cmd.extend(["--model", self.model])
+
+            # Add system prompt if provided
+            if system_prompt:
+                cmd.extend(["--system-prompt", system_prompt])
+
+            # Add the user prompt as the final argument
+            cmd.append(user_prompt)
+
+            # Run claude CLI
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+                raise RuntimeError(f"claude CLI failed: {error_msg}")
+
+            content = result.stdout.strip()
+
+            # Estimate token usage
+            input_text = (system_prompt or "") + user_prompt
+            return LLMResponse(
+                content=content,
+                model=self.model or "claude-code",
+                usage={
+                    "input_tokens": self.count_tokens(input_text),
+                    "output_tokens": self.count_tokens(content),
+                    "total_tokens": self.count_tokens(input_text) + self.count_tokens(content),
+                },
+                finish_reason="stop",
+                metadata={"source": "claude-code-cli"},
+            )
+
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"claude CLI timed out after {self.timeout}s")
+
+    def generate_streaming(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+    ):
+        """Generate a streaming response using Claude Code CLI.
+
+        Note: Claude Code CLI doesn't support true streaming in --print mode,
+        so this yields the complete response as a single chunk.
+        """
+        response = self.generate(system_prompt, user_prompt, max_tokens, temperature)
+        yield response.content
+
+
+def get_llm_client(prefer_claude_code: bool = True, **kwargs) -> LLMClient:
+    """Get the best available LLM client.
+
+    Args:
+        prefer_claude_code: If True, prefer Claude Code CLI over API.
+        **kwargs: Additional arguments passed to the client constructor.
+
+    Returns:
+        LLMClient instance.
+
+    Raises:
+        RuntimeError: If no LLM client is available.
+    """
+    errors = []
+
+    # Try Claude Code CLI first if preferred
+    if prefer_claude_code:
+        try:
+            return ClaudeCodeClient(**{k: v for k, v in kwargs.items() if k in ['model', 'timeout']})
+        except Exception as e:
+            errors.append(f"Claude Code CLI: {e}")
+
+    # Try Anthropic API
+    try:
+        return ClaudeClient(**{k: v for k, v in kwargs.items() if k in ['api_key', 'model']})
+    except Exception as e:
+        errors.append(f"Anthropic API: {e}")
+
+    # Try Claude Code CLI as fallback if not preferred
+    if not prefer_claude_code:
+        try:
+            return ClaudeCodeClient(**{k: v for k, v in kwargs.items() if k in ['model', 'timeout']})
+        except Exception as e:
+            errors.append(f"Claude Code CLI: {e}")
+
+    raise RuntimeError(
+        "No LLM client available. Errors:\n" + "\n".join(f"  - {e}" for e in errors)
+    )

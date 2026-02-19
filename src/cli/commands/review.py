@@ -167,12 +167,17 @@ def _load_spec(spec_path: str, specs_path: Path):
 
 
 def _get_llm_client(verbose: bool):
-    """Get LLM client for intelligent review."""
+    """Get LLM client for intelligent review.
+
+    Prefers Claude Code CLI (uses your existing authentication) over API.
+    """
     try:
-        from src.llm.client import ClaudeClient
+        from src.llm.client import get_llm_client
+        client = get_llm_client(prefer_claude_code=True)
         if verbose:
-            console.print("[dim]Using LLM for intelligent review...[/dim]")
-        return ClaudeClient()
+            client_type = type(client).__name__
+            console.print(f"[dim]Using {client_type} for intelligent review...[/dim]")
+        return client
     except Exception as e:
         if verbose:
             console.print(f"[yellow]Warning:[/yellow] LLM not available: {e}")
