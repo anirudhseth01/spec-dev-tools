@@ -330,6 +330,21 @@ class FlowOrchestrator:
                 pass  # Don't let hooks break the flow
 
 
+# Dependency configuration for all known agent types
+AGENT_DEPENDENCIES: dict[str, tuple[list[str], list[str]]] = {
+    # (depends_on, provides)
+    "coding_agent": ([], ["code", "files_created"]),
+    "linter_agent": (["coding_agent"], ["linted_code"]),
+    # Support both naming conventions for test agent
+    "test_generator_agent": (["coding_agent"], ["tests", "test_files"]),
+    "testing_agent": (["coding_agent"], ["tests", "test_files"]),
+    # CodeReviewAgent needs both code and tests - we check for either test agent name
+    "code_review_agent": (["coding_agent", "testing_agent"], ["review"]),
+    "security_agent": (["coding_agent"], ["security_report"]),
+    "architecture_agent": (["coding_agent"], ["architecture_update"]),
+}
+
+
 # Convenience function for common flow patterns
 def create_standard_flow(
     spec: Spec,
@@ -339,30 +354,91 @@ def create_standard_flow(
     """Create a standard sequential flow with default dependencies.
 
     Standard flow:
-    1. CodingAgent (produces: code)
-    2. LinterAgent (depends: code, produces: linted_code)
-    3. TestGeneratorAgent (depends: code, produces: tests)
-    4. CodeReviewAgent (depends: code, tests)
-    5. SecurityAgent (depends: code)
+    1. CodingAgent (produces: code, files_created)
+    2. SecurityScanAgent (depends: coding_agent, produces: security_report)
+    3. TestGeneratorAgent (depends: coding_agent, produces: tests, test_files)
+    4. CodeReviewAgent (depends: coding_agent, test_generator_agent, produces: review)
+
+    Args:
+        spec: The specification to implement.
+        project_root: Root directory of the project.
+        agents: List of agent instances to include in the flow.
+
+    Returns:
+        Configured FlowOrchestrator ready for execution.
     """
     orchestrator = FlowOrchestrator(spec, project_root, FlowStrategy.DAG)
 
-    # Default dependency map
-    default_deps = {
-        "coding_agent": ([], ["code", "files_created"]),
-        "linter_agent": (["coding_agent"], ["linted_code"]),
-        "test_generator_agent": (["coding_agent"], ["tests", "test_files"]),
-        "code_review_agent": (["coding_agent", "test_generator_agent"], ["review"]),
-        "security_agent": (["coding_agent"], ["security_report"]),
-        "architecture_agent": (["coding_agent"], ["architecture_update"]),
-    }
-
     for agent in agents:
-        deps, provides = default_deps.get(agent.name, ([], []))
+        deps, provides = AGENT_DEPENDENCIES.get(agent.name, ([], []))
         orchestrator.register_agent(
             agent=agent,
             depends_on=deps,
             provides=provides,
         )
+
+    return orchestrator
+
+
+def create_flow_with_all_agents(
+    spec: Spec,
+    project_root: Path,
+    coding_agent: BaseAgent,
+    security_agent: BaseAgent,
+    test_generator_agent: BaseAgent,
+    code_review_agent: BaseAgent,
+) -> FlowOrchestrator:
+    """Create a flow with all standard agents configured with proper dependencies.
+
+    This is a convenience function that ensures all agents are properly connected:
+    - CodingAgent: No dependencies, provides code and files_created
+    - SecurityScanAgent: Depends on coding_agent, provides security_report
+    - TestGeneratorAgent: Depends on coding_agent, provides tests and test_files
+    - CodeReviewAgent: Depends on coding_agent and test agent, provides review
+
+    Args:
+        spec: The specification to implement.
+        project_root: Root directory of the project.
+        coding_agent: CodingAgent instance.
+        security_agent: SecurityScanAgent instance.
+        test_generator_agent: TestGeneratorAgent instance.
+        code_review_agent: CodeReviewAgent instance.
+
+    Returns:
+        Configured FlowOrchestrator with all agents.
+    """
+    orchestrator = FlowOrchestrator(spec, project_root, FlowStrategy.DAG)
+
+    # Register CodingAgent (no dependencies, produces code)
+    orchestrator.register_agent(
+        agent=coding_agent,
+        depends_on=[],
+        provides=["code", "files_created"],
+        priority=100,  # Highest priority, runs first
+    )
+
+    # Register SecurityScanAgent (depends on code)
+    orchestrator.register_agent(
+        agent=security_agent,
+        depends_on=[coding_agent.name],
+        provides=["security_report"],
+        priority=80,
+    )
+
+    # Register TestGeneratorAgent (depends on code)
+    orchestrator.register_agent(
+        agent=test_generator_agent,
+        depends_on=[coding_agent.name],
+        provides=["tests", "test_files"],
+        priority=80,
+    )
+
+    # Register CodeReviewAgent (depends on code and tests)
+    orchestrator.register_agent(
+        agent=code_review_agent,
+        depends_on=[coding_agent.name, test_generator_agent.name],
+        provides=["review"],
+        priority=50,
+    )
 
     return orchestrator
