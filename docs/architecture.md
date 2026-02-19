@@ -402,7 +402,49 @@ PluginRegistry
 
 ---
 
-## 7. File Structure
+## 7. SecurityScanAgent Design
+
+The SecurityScanAgent performs security analysis with dual execution modes.
+
+### Execution Modes
+
+| Mode | Triggers | Duration | Checks |
+|------|----------|----------|--------|
+| **Lightweight** | Every PR, pre-commit | ~30s | Pattern-based (secrets, injection, XSS, crypto) |
+| **Heavyweight** | Nightly, on-demand | ~5-10min | Pattern + LLM analysis + spec compliance |
+
+### Scanner Pipeline
+
+```
+SecurityScanAgent
+    │
+    ▼
+ScannerRegistry
+    ├── PatternScanner     (fast, regex-based, always runs)
+    ├── LLMScanner         (heavyweight only, deep analysis)
+    └── SpecComplianceScanner (heavyweight only, verifies spec requirements)
+```
+
+### Severity Levels
+
+| Severity | Blocks PR | Blocks Deploy | Examples |
+|----------|-----------|---------------|----------|
+| CRITICAL | Yes | Yes | Hardcoded secrets, SQL injection |
+| HIGH | Yes | No | XSS, weak crypto, missing auth |
+| MEDIUM | No | No | Missing rate limiting, input validation |
+| LOW | No | No | Best practice suggestions |
+
+### Built-in Pattern Detection
+
+- **Secrets:** Hardcoded passwords, API keys, private keys
+- **Injection:** SQL, command, code (eval/exec)
+- **XSS:** innerHTML, document.write, unsafe templates
+- **Crypto:** MD5, SHA1, insecure random
+- **Config:** Debug mode, binding to 0.0.0.0
+
+---
+
+## 8. File Structure
 
 ```
 src/
@@ -423,13 +465,23 @@ src/
 │
 └── agents/
     ├── base.py                # AgentContext with block/rules support
-    └── coding/
-        ├── agent.py           # CodingAgent implementation
-        ├── context_builder.py # Builds code context for LLM
-        ├── ambiguity.py       # Ambiguity detection and resolution
-        └── plugins/
-            ├── base.py        # Plugin interface
-            ├── registry.py    # Plugin registry
-            ├── python_plugin.py
-            └── typescript_plugin.py
+    ├── coding/
+    │   ├── agent.py           # CodingAgent implementation
+    │   ├── context_builder.py # Builds code context for LLM
+    │   ├── ambiguity.py       # Ambiguity detection and resolution
+    │   └── plugins/
+    │       ├── base.py        # Plugin interface
+    │       ├── registry.py    # Plugin registry
+    │       ├── python_plugin.py
+    │       └── typescript_plugin.py
+    │
+    └── security/
+        ├── agent.py           # SecurityScanAgent implementation
+        ├── findings.py        # Finding, SecurityReport classes
+        └── scanners/
+            ├── base.py        # Scanner interface
+            ├── registry.py    # Scanner registry
+            ├── pattern_scanner.py   # Fast regex-based detection
+            ├── llm_scanner.py       # LLM-powered deep analysis
+            └── spec_compliance.py   # Spec requirement verification
 ```
