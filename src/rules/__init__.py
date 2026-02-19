@@ -15,13 +15,21 @@ from src.rules.validators import (
     check_https_required,
     check_min_tests,
 )
+from src.rules.context_manager import (
+    RulesContextManager,
+    RulesContextPack,
+    ContextBudget,
+)
 
 __all__ = [
+    "ContextBudget",
     "Rule",
     "RuleCategory",
     "RuleLevel",
     "RuleSeverity",
     "RuleViolation",
+    "RulesContextManager",
+    "RulesContextPack",
     "RulesEngine",
     "SameAsReference",
     "check_auth_required",
