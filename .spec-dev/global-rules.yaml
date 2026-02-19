@@ -1,0 +1,110 @@
+# Global Rules Configuration
+# These rules apply to all block specifications in the project.
+
+rules:
+  - id: SEC-001
+    name: Require Authentication for APIs
+    level: global
+    category: security
+    severity: error
+    applies_to_sections:
+      - security
+      - api_contract
+    validation_fn: check_auth_required
+    validation_args: {}
+    description: All API endpoints must require authentication
+    enabled: true
+
+  - id: SEC-002
+    name: HTTPS Required
+    level: global
+    category: security
+    severity: error
+    applies_to_sections:
+      - api_contract
+    validation_fn: check_https_required
+    validation_args: {}
+    description: All API endpoints must use HTTPS
+    enabled: true
+
+  - id: SEC-003
+    name: PII Encryption Required
+    level: global
+    category: security
+    severity: error
+    applies_to_sections:
+      - security
+    validation_fn: check_pii_encryption
+    validation_args: {}
+    description: Systems handling PII must have encryption enabled
+    enabled: true
+
+  - id: TEST-001
+    name: Minimum Unit Tests
+    level: global
+    category: testing
+    severity: warning
+    applies_to_sections:
+      - test_cases
+    validation_fn: check_min_tests
+    validation_args:
+      min_unit_tests: 3
+      min_integration_tests: 1
+    description: Specifications must define minimum test cases
+    enabled: true
+
+  - id: TEST-002
+    name: Coverage Targets
+    level: global
+    category: testing
+    severity: warning
+    applies_to_sections:
+      - test_cases
+    validation_fn: check_coverage_targets
+    validation_args:
+      min_line_coverage: 80
+      min_branch_coverage: 70
+    description: Test coverage targets must meet minimum thresholds
+    enabled: true
+
+  - id: API-001
+    name: Health Check Endpoints
+    level: global
+    category: api
+    severity: warning
+    applies_to_sections:
+      - api_contract
+    validation_fn: check_health_checks
+    validation_args:
+      required_endpoints:
+        - /health
+        - /ready
+    description: APIs should include health check endpoints
+    enabled: false  # Disabled by default
+
+  - id: PERF-001
+    name: Performance Targets
+    level: global
+    category: performance
+    severity: info
+    applies_to_sections:
+      - performance
+    validation_fn: check_performance_targets
+    validation_args:
+      max_p99_ms: 5000
+      min_rps: 10
+    description: Performance targets should be reasonable
+    enabled: true
+
+  - id: ERR-001
+    name: Error Handling Defined
+    level: global
+    category: code_quality
+    severity: warning
+    applies_to_sections:
+      - error_handling
+    validation_fn: check_error_handling
+    validation_args:
+      min_error_types: 1
+    description: Error handling must be defined
+    enabled: true
