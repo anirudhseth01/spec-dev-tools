@@ -29,6 +29,7 @@ class DiscussionAction(Enum):
     NEXT_TOPIC = "next_topic"  # Move to next topic
     COMPLETE = "complete"  # Discussion is complete
     CLARIFY = "clarify"  # Need clarification on answer
+    ANALYZE_REPO = "analyze_repo"  # Analyzing a reference repository
 
 
 @dataclass
@@ -41,6 +42,7 @@ class DiscussionResult:
     options: list[Option] = field(default_factory=list)  # Options if any
     decision: Decision | None = None  # Recorded decision if any
     needs_research: bool = False  # Whether to trigger research
+    repo_analysis: dict | None = None  # RepoAnalysis dict if analyzing a repo
 
 
 # Prompts for discussion generation
@@ -663,3 +665,95 @@ class DiscussionEngine:
     def is_complete(self) -> bool:
         """Check if all required topics have been covered."""
         return self.session.is_discussion_complete
+
+    async def add_reference_repo(self, repo_url: str) -> DiscussionResult:
+        """Add a reference repository to analyze for patterns.
+
+        Args:
+            repo_url: GitHub repository URL to analyze.
+
+        Returns:
+            DiscussionResult with analysis status.
+        """
+        if not self.research_agent:
+            return DiscussionResult(
+                action=DiscussionAction.CONTINUE,
+                message="Research agent not available. Cannot analyze repository.",
+            )
+
+        try:
+            # Build context from session
+            context = self._build_context()
+
+            # Analyze the repository
+            analysis = await self.research_agent.analyze_github_repo(repo_url, context)
+
+            # Store in session
+            self.session.add_reference_repo(analysis.to_dict())
+
+            # Format summary for display
+            if analysis.status.value == "completed":
+                summary_parts = [
+                    f"Analyzed repository: **{analysis.repo_name}**",
+                    f"Language: {analysis.primary_language}",
+                ]
+
+                if analysis.structure_summary:
+                    summary_parts.append(f"\n{analysis.structure_summary}")
+
+                if analysis.architecture_patterns:
+                    summary_parts.append(
+                        f"\nArchitecture patterns: {', '.join(analysis.architecture_patterns)}"
+                    )
+
+                if analysis.reusable_components:
+                    summary_parts.append(
+                        f"\nFound {len(analysis.reusable_components)} reusable components:"
+                    )
+                    for comp in analysis.reusable_components[:5]:  # Show top 5
+                        summary_parts.append(
+                            f"  - **{comp.name}** ({comp.component_type}): {comp.description}"
+                        )
+                        if comp.relevance_score > 0.7:
+                            summary_parts.append(f"    Relevance: High ({comp.relevance_score:.0%})")
+
+                if analysis.recommendations:
+                    summary_parts.append("\nRecommendations:")
+                    for rec in analysis.recommendations[:3]:
+                        summary_parts.append(f"  - {rec}")
+
+                return DiscussionResult(
+                    action=DiscussionAction.ANALYZE_REPO,
+                    message="\n".join(summary_parts),
+                    repo_analysis=analysis.to_dict(),
+                )
+            else:
+                return DiscussionResult(
+                    action=DiscussionAction.CONTINUE,
+                    message=f"Failed to analyze repository: {analysis.error_message}",
+                    repo_analysis=analysis.to_dict(),
+                )
+
+        except Exception as e:
+            return DiscussionResult(
+                action=DiscussionAction.CONTINUE,
+                message=f"Error analyzing repository: {str(e)}",
+            )
+
+    def get_reference_repos_summary(self) -> str:
+        """Get a summary of all reference repositories.
+
+        Returns:
+            Formatted summary of reference repos.
+        """
+        if not self.session.reference_repos:
+            return "No reference repositories added yet."
+
+        lines = ["Reference repositories:"]
+        for repo in self.session.reference_repos:
+            repo_name = repo.get("repo_name", "Unknown")
+            language = repo.get("primary_language", "Unknown")
+            components = repo.get("reusable_components", [])
+            lines.append(f"  - {repo_name} ({language}) - {len(components)} components")
+
+        return "\n".join(lines)

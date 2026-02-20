@@ -21,7 +21,15 @@ from src.builder.session import (
 )
 from src.builder.persistence import SessionPersistence
 from src.builder.discussion import DiscussionEngine, DiscussionResult
-from src.builder.research import ResearchAgent, ResearchResult, ValidationResult
+from src.builder.research import (
+    ResearchAgent,
+    ResearchResult,
+    ValidationResult,
+    RepoFile,
+    ReusableComponent,
+    RepoAnalysis,
+    GitHubAnalyzer,
+)
 from src.builder.designer import BlockDesigner
 from src.builder.generator import SpecGenerator, GeneratedSpec
 from src.builder.executor import ExecutionOrchestrator, ExecutionResult, BlockResult
@@ -46,6 +54,10 @@ __all__ = [
     "ResearchAgent",
     "ResearchResult",
     "ValidationResult",
+    "RepoFile",
+    "ReusableComponent",
+    "RepoAnalysis",
+    "GitHubAnalyzer",
     # Designer
     "BlockDesigner",
     # Generator

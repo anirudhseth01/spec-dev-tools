@@ -333,6 +333,9 @@ class BuilderSession:
     decisions: list[Decision] = field(default_factory=list)
     current_topic_index: int = 0
 
+    # Reference repositories for pattern reuse
+    reference_repos: list[dict] = field(default_factory=list)  # List of RepoAnalysis dicts
+
     # Design phase
     hierarchy_design: HierarchyDesign | None = None
 
@@ -387,6 +390,15 @@ class BuilderSession:
         self.phase = phase
         self.updated_at = datetime.now()
 
+    def add_reference_repo(self, repo_analysis: dict) -> None:
+        """Add a reference repository analysis.
+
+        Args:
+            repo_analysis: RepoAnalysis as dict (use .to_dict()).
+        """
+        self.reference_repos.append(repo_analysis)
+        self.updated_at = datetime.now()
+
     def to_dict(self) -> dict[str, Any]:
         """Convert session to dictionary."""
         return {
@@ -397,6 +409,7 @@ class BuilderSession:
             "initial_description": self.initial_description,
             "decisions": [d.to_dict() for d in self.decisions],
             "current_topic_index": self.current_topic_index,
+            "reference_repos": self.reference_repos,
             "hierarchy_design": self.hierarchy_design.to_dict()
             if self.hierarchy_design
             else None,
@@ -419,6 +432,7 @@ class BuilderSession:
             initial_description=data.get("initial_description", ""),
             decisions=[Decision.from_dict(d) for d in data.get("decisions", [])],
             current_topic_index=data.get("current_topic_index", 0),
+            reference_repos=data.get("reference_repos", []),
             hierarchy_design=HierarchyDesign.from_dict(data["hierarchy_design"])
             if data.get("hierarchy_design")
             else None,

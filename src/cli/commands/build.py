@@ -24,6 +24,7 @@ from src.builder.session import (
 )
 from src.builder.persistence import SessionPersistence
 from src.builder.discussion import DiscussionEngine, DiscussionAction
+from src.builder.research import ResearchAgent
 from src.builder.designer import BlockDesigner
 from src.builder.generator import SpecGenerator
 from src.builder.executor import ExecutionOrchestrator
@@ -408,6 +409,121 @@ def delete(session_id: str, force: bool, project_dir: str) -> None:
     console.print(f"[green]Deleted session:[/green] {session_id}")
 
 
+@build.command("analyze-repo")
+@click.argument("session_id")
+@click.argument("repo_url")
+@click.option("--project-dir", default=".", help="Project root directory")
+def analyze_repo(session_id: str, repo_url: str, project_dir: str) -> None:
+    """Analyze a GitHub repository for reusable patterns.
+
+    Analyzes the given GitHub repository to find architecture patterns,
+    reusable components, and code that could be adapted for your project.
+
+    Example:
+        spec-dev build analyze-repo bs-abc123 https://github.com/fastapi/fastapi
+    """
+    project_path = Path(project_dir)
+    persistence = SessionPersistence(project_path)
+
+    session = persistence.load(session_id)
+    if not session:
+        console.print(f"[red]Session not found:[/red] {session_id}")
+        raise SystemExit(1)
+
+    llm_client = _get_llm_client()
+    research_agent = ResearchAgent(llm_client, session.research_depth)
+    engine = DiscussionEngine(session, llm_client, research_agent)
+
+    console.print(f"\n[bold]Analyzing repository:[/bold] {repo_url}")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Fetching repository data...", total=None)
+
+        result = asyncio.run(engine.add_reference_repo(repo_url))
+
+        progress.update(task, description="Analysis complete", completed=True)
+
+    # Display results
+    if result.action == DiscussionAction.ANALYZE_REPO:
+        console.print(Panel(
+            result.message,
+            title=f"Repository Analysis",
+            border_style="green",
+        ))
+
+        if result.repo_analysis:
+            components = result.repo_analysis.get("reusable_components", [])
+            if components:
+                console.print(f"\n[bold]Found {len(components)} reusable components.[/bold]")
+                console.print("These will be considered when generating specs.")
+    else:
+        console.print(f"[yellow]{result.message}[/yellow]")
+
+    # Save session
+    persistence.save(session)
+
+    console.print(f"\n[green]Repository added to session.[/green]")
+    console.print(f"Total reference repos: {len(session.reference_repos)}")
+
+
+@build.command("list-repos")
+@click.argument("session_id")
+@click.option("--project-dir", default=".", help="Project root directory")
+def list_repos(session_id: str, project_dir: str) -> None:
+    """List reference repositories for a session.
+
+    Example:
+        spec-dev build list-repos bs-abc123
+    """
+    project_path = Path(project_dir)
+    persistence = SessionPersistence(project_path)
+
+    session = persistence.load(session_id)
+    if not session:
+        console.print(f"[red]Session not found:[/red] {session_id}")
+        raise SystemExit(1)
+
+    if not session.reference_repos:
+        console.print("[yellow]No reference repositories added yet.[/yellow]")
+        console.print(f"\nAdd one with: spec-dev build analyze-repo {session_id} <github-url>")
+        return
+
+    table = Table(title="Reference Repositories", show_header=True)
+    table.add_column("Repository")
+    table.add_column("Language")
+    table.add_column("Components")
+    table.add_column("Patterns")
+
+    for repo in session.reference_repos:
+        components = repo.get("reusable_components", [])
+        patterns = repo.get("architecture_patterns", [])
+        table.add_row(
+            repo.get("repo_name", "Unknown"),
+            repo.get("primary_language", "-"),
+            str(len(components)),
+            ", ".join(patterns[:2]) if patterns else "-",
+        )
+
+    console.print(table)
+
+    # Show component details
+    for repo in session.reference_repos:
+        components = repo.get("reusable_components", [])
+        if components:
+            console.print(f"\n[bold]{repo.get('repo_name', 'Unknown')}[/bold] components:")
+            for comp in components[:5]:
+                score = comp.get("relevance_score", 0)
+                score_style = "green" if score > 0.7 else "yellow" if score > 0.4 else "dim"
+                console.print(
+                    f"  - [{score_style}]{comp.get('name', 'Unknown')}[/{score_style}] "
+                    f"({comp.get('component_type', '-')}): {comp.get('description', '')[:50]}"
+                )
+
+
 def _run_discussion(
     session: BuilderSession,
     persistence: SessionPersistence,
@@ -415,13 +531,15 @@ def _run_discussion(
 ) -> None:
     """Run the interactive discussion phase."""
     llm_client = _get_llm_client()
-    engine = DiscussionEngine(session, llm_client)
+    research_agent = ResearchAgent(llm_client, session.research_depth)
+    engine = DiscussionEngine(session, llm_client, research_agent)
 
     console.print("\n" + "=" * 60)
     console.print("[bold]Interactive Design Session[/bold]")
     console.print("=" * 60)
     console.print("\nI'll ask you questions about your system design.")
-    console.print("Type your answer, select an option number, or type 'quit' to pause.\n")
+    console.print("Type your answer, select an option number, or type 'quit' to pause.")
+    console.print("[dim]Tip: Type 'repo <url>' to analyze a GitHub repo for patterns.[/dim]\n")
 
     # Get initial question
     question = asyncio.run(engine.start_discussion())
@@ -437,6 +555,30 @@ def _run_discussion(
                 persistence.save(session)
                 console.print(f"Resume with: spec-dev build resume {session.id}")
                 return
+
+            # Check for repo command
+            if response.lower().startswith("repo "):
+                repo_url = response[5:].strip()
+                if repo_url:
+                    console.print(f"\n[bold]Analyzing repository:[/bold] {repo_url}")
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        console=console,
+                    ) as progress:
+                        task = progress.add_task("Fetching repository...", total=None)
+                        repo_result = asyncio.run(engine.add_reference_repo(repo_url))
+                        progress.update(task, completed=True)
+
+                    if repo_result.action == DiscussionAction.ANALYZE_REPO:
+                        console.print(Panel(repo_result.message, border_style="green"))
+                    else:
+                        console.print(f"[yellow]{repo_result.message}[/yellow]")
+                    persistence.save(session)
+                    continue
+                else:
+                    console.print("[yellow]Usage: repo <github-url>[/yellow]")
+                    continue
 
             # Process response
             result = asyncio.run(engine.process_response(response))
@@ -544,6 +686,17 @@ def _display_session_status(session: BuilderSession) -> None:
                 table.add_row(d.topic, choice, notes[:30])
 
         console.print(table)
+
+    # Show reference repos if any
+    if session.reference_repos:
+        console.print(f"\n[bold]Reference Repos:[/bold] {len(session.reference_repos)}")
+        for repo in session.reference_repos:
+            components = repo.get("reusable_components", [])
+            console.print(
+                f"  - {repo.get('repo_name', 'Unknown')} "
+                f"({repo.get('primary_language', '-')}) - "
+                f"{len(components)} components"
+            )
 
     # Show hierarchy if available
     if session.hierarchy_design:
