@@ -45,11 +45,66 @@ def build() -> None:
 
     \b
     Getting started:
+      spec-dev build ui                      # Launch web UI
       spec-dev build start --name "my-system"
       spec-dev build resume [session-id]
       spec-dev build list
     """
     pass
+
+
+@build.command()
+@click.option("--port", "-p", default=8501, help="Port to run the UI on")
+@click.option("--project-dir", default=".", help="Project root directory")
+def ui(port: int, project_dir: str) -> None:
+    """Launch the Spec Builder web UI.
+
+    Opens a Streamlit-based web interface for interactive system design.
+
+    Example:
+        spec-dev build ui
+        spec-dev build ui --port 8080
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    # Get the path to the UI app
+    ui_app_path = Path(__file__).parent.parent.parent / "ui" / "app.py"
+
+    if not ui_app_path.exists():
+        console.print(f"[red]UI app not found at:[/red] {ui_app_path}")
+        raise SystemExit(1)
+
+    console.print(f"\n[bold green]Launching Spec Builder UI...[/bold green]")
+    console.print(f"  Port: {port}")
+    console.print(f"  Project: {project_dir}")
+    console.print(f"\n[dim]Press Ctrl+C to stop[/dim]\n")
+
+    try:
+        # Launch streamlit
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                str(ui_app_path),
+                "--server.port",
+                str(port),
+                "--server.headless",
+                "false",
+                "--browser.gatherUsageStats",
+                "false",
+            ],
+            cwd=project_dir,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Failed to start UI:[/red] {e}")
+        raise SystemExit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]UI stopped.[/yellow]")
 
 
 @build.command()
