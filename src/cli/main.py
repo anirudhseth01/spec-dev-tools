@@ -21,6 +21,7 @@ from src.cli.commands.templates import template_group
 from src.cli.commands.docs import docs_command
 from src.cli.commands.graph import graph_command, validate_cross_command
 from src.cli.commands.coverage import coverage_group
+from src.cli.commands.watch import watch_command
 
 
 @click.group()
@@ -94,6 +95,7 @@ cli.add_command(docs_command, name="docs")
 cli.add_command(graph_command, name="graph")
 cli.add_command(validate_cross_command, name="validate-cross")
 cli.add_command(coverage_group, name="coverage")
+cli.add_command(watch_command, name="watch")
 
 
 if __name__ == "__main__":

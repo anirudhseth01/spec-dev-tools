@@ -1,0 +1,159 @@
+{
+  "name": "spec-dev-tools",
+  "displayName": "Spec Dev Tools",
+  "description": "VSCode extension for spec-driven development - syntax highlighting, validation, and autocomplete for spec files",
+  "version": "0.1.0",
+  "publisher": "spec-dev",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Snippets"
+  ],
+  "keywords": [
+    "spec",
+    "specification",
+    "markdown",
+    "validation",
+    "code-generation"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown",
+    "workspaceContains:**/block.md",
+    "workspaceContains:specs/**/*.md"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "spec-markdown",
+        "aliases": ["Spec Markdown", "spec-md"],
+        "extensions": [".spec.md"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "spec-markdown",
+        "scopeName": "text.html.markdown.spec",
+        "path": "./syntaxes/spec-markdown.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "markdown",
+        "path": "./snippets/spec-snippets.json"
+      },
+      {
+        "language": "spec-markdown",
+        "path": "./snippets/spec-snippets.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "specDev.validate",
+        "title": "Spec Dev: Validate Current Spec"
+      },
+      {
+        "command": "specDev.implement",
+        "title": "Spec Dev: Implement Spec"
+      },
+      {
+        "command": "specDev.preview",
+        "title": "Spec Dev: Preview Generated Code"
+      },
+      {
+        "command": "specDev.lint",
+        "title": "Spec Dev: Lint Current Spec"
+      },
+      {
+        "command": "specDev.createFromTemplate",
+        "title": "Spec Dev: Create Spec from Template"
+      },
+      {
+        "command": "specDev.showGraph",
+        "title": "Spec Dev: Show Dependency Graph"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "resourceFilename =~ /block\\.md$/ || resourceFilename =~ /\\.spec\\.md$/",
+          "command": "specDev.validate",
+          "group": "specDev@1"
+        },
+        {
+          "when": "resourceFilename =~ /block\\.md$/ || resourceFilename =~ /\\.spec\\.md$/",
+          "command": "specDev.implement",
+          "group": "specDev@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "when": "resourceFilename =~ /block\\.md$/",
+          "command": "specDev.validate",
+          "group": "specDev@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Spec Dev Tools",
+      "properties": {
+        "specDev.specsDirectory": {
+          "type": "string",
+          "default": "specs",
+          "description": "Directory containing spec files"
+        },
+        "specDev.autoValidate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically validate specs on save"
+        },
+        "specDev.showInlineHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline hints for spec sections"
+        },
+        "specDev.lintOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run linter on save"
+        },
+        "specDev.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Path to Python interpreter"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "specDev.validate",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "editorTextFocus && resourceFilename =~ /block\\.md$/"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anirudhseth01/spec-dev-tools"
+  }
+}

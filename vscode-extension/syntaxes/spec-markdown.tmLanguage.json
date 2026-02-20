@@ -1,0 +1,235 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Spec Markdown",
+  "scopeName": "text.html.markdown.spec",
+  "patterns": [
+    { "include": "#spec-header" },
+    { "include": "#section-headers" },
+    { "include": "#metadata-table" },
+    { "include": "#status-values" },
+    { "include": "#spec-keywords" },
+    { "include": "#table-separators" },
+    { "include": "#code-blocks" },
+    { "include": "#inline-code" },
+    { "include": "#links" },
+    { "include": "#emphasis" },
+    { "include": "#lists" },
+    { "include": "text.html.markdown" }
+  ],
+  "repository": {
+    "spec-header": {
+      "match": "^#\\s+(.*?)\\s+(Specification|Block Specification)\\s*$",
+      "captures": {
+        "0": { "name": "markup.heading.1.spec" },
+        "1": { "name": "entity.name.spec" },
+        "2": { "name": "keyword.control.spec" }
+      }
+    },
+    "section-headers": {
+      "patterns": [
+        {
+          "match": "^##\\s+0\\.\\s+Block Configuration\\s*$",
+          "name": "markup.heading.2.block-config.spec"
+        },
+        {
+          "match": "^##\\s+1\\.\\s+Metadata\\s*$",
+          "name": "markup.heading.2.metadata.spec"
+        },
+        {
+          "match": "^##\\s+2\\.\\s+Overview\\s*$",
+          "name": "markup.heading.2.overview.spec"
+        },
+        {
+          "match": "^##\\s+3\\.\\s+Inputs\\s*$",
+          "name": "markup.heading.2.inputs.spec"
+        },
+        {
+          "match": "^##\\s+4\\.\\s+Outputs\\s*$",
+          "name": "markup.heading.2.outputs.spec"
+        },
+        {
+          "match": "^##\\s+5\\.\\s+Dependencies\\s*$",
+          "name": "markup.heading.2.dependencies.spec"
+        },
+        {
+          "match": "^##\\s+6\\.\\s+API Contract\\s*$",
+          "name": "markup.heading.2.api.spec"
+        },
+        {
+          "match": "^##\\s+7\\.\\s+Test Cases\\s*$",
+          "name": "markup.heading.2.tests.spec"
+        },
+        {
+          "match": "^##\\s+8\\.\\s+Edge Cases\\s*$",
+          "name": "markup.heading.2.edge-cases.spec"
+        },
+        {
+          "match": "^##\\s+9\\.\\s+Error Handling\\s*$",
+          "name": "markup.heading.2.errors.spec"
+        },
+        {
+          "match": "^##\\s+10\\.\\s+Performance\\s*$",
+          "name": "markup.heading.2.performance.spec"
+        },
+        {
+          "match": "^##\\s+11\\.\\s+Security\\s*$",
+          "name": "markup.heading.2.security.spec"
+        },
+        {
+          "match": "^##\\s+12\\.\\s+Implementation\\s*$",
+          "name": "markup.heading.2.implementation.spec"
+        },
+        {
+          "match": "^##\\s+13\\.\\s+Acceptance\\s*$",
+          "name": "markup.heading.2.acceptance.spec"
+        },
+        {
+          "match": "^###\\s+\\d+\\.\\d+\\s+(.*)$",
+          "name": "markup.heading.3.subsection.spec"
+        }
+      ]
+    },
+    "metadata-table": {
+      "patterns": [
+        {
+          "match": "\\|\\s*(Spec ID|Version|Status|Tech Stack|Author|Block Type|Parent)\\s*\\|",
+          "captures": {
+            "1": { "name": "variable.other.spec-field" }
+          }
+        },
+        {
+          "match": "\\|\\s*(SPEC-\\d+|BLOCK-\\d+)\\s*\\|",
+          "captures": {
+            "1": { "name": "constant.other.spec-id" }
+          }
+        },
+        {
+          "match": "\\|\\s*(\\d+\\.\\d+\\.\\d+)\\s*\\|",
+          "captures": {
+            "1": { "name": "constant.numeric.version" }
+          }
+        }
+      ]
+    },
+    "status-values": {
+      "patterns": [
+        {
+          "match": "\\b(draft)\\b",
+          "name": "string.other.status.draft"
+        },
+        {
+          "match": "\\b(review)\\b",
+          "name": "string.other.status.review"
+        },
+        {
+          "match": "\\b(approved)\\b",
+          "name": "string.other.status.approved"
+        },
+        {
+          "match": "\\b(implemented)\\b",
+          "name": "string.other.status.implemented"
+        },
+        {
+          "match": "\\b(deprecated)\\b",
+          "name": "string.other.status.deprecated"
+        }
+      ]
+    },
+    "spec-keywords": {
+      "patterns": [
+        {
+          "match": "\\b(Required|Optional|Yes|No|None)\\b",
+          "name": "keyword.other.spec"
+        },
+        {
+          "match": "\\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\b",
+          "name": "keyword.other.http-method"
+        },
+        {
+          "match": "\\b(p50|p95|p99|RPS)\\b",
+          "name": "variable.other.metric"
+        },
+        {
+          "match": "\\b(UT-\\d+|IT-\\d+|E2E-\\d+)\\b",
+          "name": "constant.other.test-id"
+        },
+        {
+          "match": "\\b(root|component|module|leaf)\\b",
+          "name": "constant.language.block-type"
+        },
+        {
+          "match": "\\b(replace|extend|merge)\\b",
+          "name": "keyword.other.merge-mode"
+        }
+      ]
+    },
+    "table-separators": {
+      "match": "^\\|[-:| ]+\\|$",
+      "name": "markup.table.separator"
+    },
+    "code-blocks": {
+      "begin": "^```(\\w+)?$",
+      "end": "^```$",
+      "beginCaptures": {
+        "0": { "name": "markup.fenced_code.block.markdown" },
+        "1": { "name": "entity.name.tag.language" }
+      },
+      "endCaptures": {
+        "0": { "name": "markup.fenced_code.block.markdown" }
+      },
+      "contentName": "meta.embedded.block.code"
+    },
+    "inline-code": {
+      "match": "`[^`]+`",
+      "name": "markup.inline.raw.string.markdown"
+    },
+    "links": {
+      "match": "\\[([^\\]]+)\\]\\(([^)]+)\\)",
+      "captures": {
+        "1": { "name": "string.other.link.title.markdown" },
+        "2": { "name": "markup.underline.link.markdown" }
+      }
+    },
+    "emphasis": {
+      "patterns": [
+        {
+          "match": "\\*\\*([^*]+)\\*\\*",
+          "captures": {
+            "1": { "name": "markup.bold.markdown" }
+          }
+        },
+        {
+          "match": "\\*([^*]+)\\*",
+          "captures": {
+            "1": { "name": "markup.italic.markdown" }
+          }
+        }
+      ]
+    },
+    "lists": {
+      "patterns": [
+        {
+          "match": "^\\s*-\\s+\\[[ x]\\]\\s+(.*)$",
+          "captures": {
+            "0": { "name": "markup.list.unnumbered.markdown" },
+            "1": { "name": "meta.paragraph.markdown" }
+          }
+        },
+        {
+          "match": "^\\s*[-*+]\\s+(.*)$",
+          "captures": {
+            "0": { "name": "markup.list.unnumbered.markdown" },
+            "1": { "name": "meta.paragraph.markdown" }
+          }
+        },
+        {
+          "match": "^\\s*\\d+\\.\\s+(.*)$",
+          "captures": {
+            "0": { "name": "markup.list.numbered.markdown" },
+            "1": { "name": "meta.paragraph.markdown" }
+          }
+        }
+      ]
+    }
+  }
+}

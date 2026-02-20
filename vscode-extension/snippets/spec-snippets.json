@@ -1,0 +1,233 @@
+{
+  "Spec Template": {
+    "prefix": "spec-full",
+    "body": [
+      "# ${1:Feature Name} Specification",
+      "",
+      "## 1. Metadata",
+      "",
+      "| Field | Value |",
+      "|-------|-------|",
+      "| Spec ID | ${2:SPEC-001} |",
+      "| Version | 1.0.0 |",
+      "| Status | draft |",
+      "| Tech Stack | ${3:Python, FastAPI} |",
+      "| Author | ${4:author} |",
+      "",
+      "## 2. Overview",
+      "",
+      "### 2.1 Summary",
+      "${5:Brief description of the feature.}",
+      "",
+      "### 2.2 Goals",
+      "- ${6:Primary goal}",
+      "",
+      "### 2.3 Non-Goals",
+      "- ${7:What this feature will NOT do}",
+      "",
+      "## 3. Inputs",
+      "",
+      "### 3.1 User Inputs",
+      "| Name | Type | Required | Description |",
+      "|------|------|----------|-------------|",
+      "| ${8:param} | ${9:string} | ${10:Yes} | ${11:Description} |",
+      "",
+      "## 4. Outputs",
+      "",
+      "### 4.1 Return Values",
+      "| Name | Type | Description |",
+      "|------|------|-------------|",
+      "| ${12:result} | ${13:object} | ${14:Description} |",
+      "",
+      "## 5. Dependencies",
+      "",
+      "### 5.1 Internal Modules",
+      "- ${15:module-name}",
+      "",
+      "### 5.2 External Packages",
+      "- ${16:package-name}",
+      "",
+      "## 6. API Contract",
+      "",
+      "### 6.1 Endpoints",
+      "| Method | Path | Description |",
+      "|--------|------|-------------|",
+      "| ${17:POST} | ${18:/api/resource} | ${19:Description} |",
+      "",
+      "## 7. Test Cases",
+      "",
+      "### 7.1 Unit Tests",
+      "| ID | Description | Input | Expected |",
+      "|----|-------------|-------|----------|",
+      "| UT-01 | ${20:Test description} | ${21:input} | ${22:expected} |",
+      "",
+      "## 8. Edge Cases",
+      "",
+      "### 8.1 Boundary Conditions",
+      "- ${23:Edge case description}",
+      "",
+      "## 9. Error Handling",
+      "",
+      "### 9.1 Error Types",
+      "| Code | Name | Description |",
+      "|------|------|-------------|",
+      "| ${24:400} | ${25:ValidationError} | ${26:Invalid input} |",
+      "",
+      "## 10. Performance",
+      "",
+      "### 10.1 Latency Targets",
+      "| Metric | Target |",
+      "|--------|--------|",
+      "| p50 | ${27:<100ms} |",
+      "| p99 | ${28:<500ms} |",
+      "",
+      "## 11. Security",
+      "",
+      "### 11.1 Authentication",
+      "${29:JWT Bearer token required}",
+      "",
+      "### 11.2 Authorization",
+      "${30:Role-based access control}",
+      "",
+      "## 12. Implementation",
+      "",
+      "### 12.1 Algorithms",
+      "${31:Description of key algorithms}",
+      "",
+      "## 13. Acceptance",
+      "",
+      "### 13.1 Acceptance Criteria",
+      "- [ ] ${32:Criterion 1}",
+      "- [ ] ${33:Criterion 2}"
+    ],
+    "description": "Full specification template with all 13 sections"
+  },
+  "Block Template": {
+    "prefix": "spec-block",
+    "body": [
+      "# ${1:Block Name} Block Specification",
+      "",
+      "## 0. Block Configuration",
+      "",
+      "### 0.1 Hierarchy",
+      "| Field | Value |",
+      "|-------|-------|",
+      "| Block Type | ${2|root,component,module,leaf|} |",
+      "| Parent | ${3:-} |",
+      "",
+      "### 0.2 Sub-Blocks",
+      "| Name | Description |",
+      "|------|-------------|",
+      "| ${4:sub-block} | ${5:Description} |",
+      "",
+      "## 1. Metadata",
+      "",
+      "| Field | Value |",
+      "|-------|-------|",
+      "| Spec ID | ${6:BLOCK-001} |",
+      "| Version | 1.0.0 |",
+      "| Status | draft |",
+      "",
+      "$0"
+    ],
+    "description": "Block specification template"
+  },
+  "Metadata Section": {
+    "prefix": "spec-metadata",
+    "body": [
+      "## 1. Metadata",
+      "",
+      "| Field | Value |",
+      "|-------|-------|",
+      "| Spec ID | ${1:SPEC-001} |",
+      "| Version | ${2:1.0.0} |",
+      "| Status | ${3|draft,review,approved,implemented|} |",
+      "| Tech Stack | ${4:Python} |",
+      "| Author | ${5:author} |"
+    ],
+    "description": "Metadata section"
+  },
+  "API Endpoint": {
+    "prefix": "spec-endpoint",
+    "body": [
+      "### ${1:Endpoint Name}",
+      "",
+      "| Field | Value |",
+      "|-------|-------|",
+      "| Method | ${2|GET,POST,PUT,PATCH,DELETE|} |",
+      "| Path | ${3:/api/resource} |",
+      "| Auth | ${4|Required,Optional,None|} |",
+      "",
+      "**Request:**",
+      "```json",
+      "{",
+      "  \"${5:field}\": \"${6:value}\"",
+      "}",
+      "```",
+      "",
+      "**Response:**",
+      "```json",
+      "{",
+      "  \"${7:field}\": \"${8:value}\"",
+      "}",
+      "```"
+    ],
+    "description": "API endpoint definition"
+  },
+  "Test Case Row": {
+    "prefix": "spec-test",
+    "body": [
+      "| ${1:UT-01} | ${2:Test description} | ${3:input} | ${4:expected} |"
+    ],
+    "description": "Test case table row"
+  },
+  "Error Type Row": {
+    "prefix": "spec-error",
+    "body": [
+      "| ${1:400} | ${2:ErrorName} | ${3:Description} |"
+    ],
+    "description": "Error type table row"
+  },
+  "Dependency Row": {
+    "prefix": "spec-dep",
+    "body": [
+      "| ${1:module-name} | ${2:^1.0.0} | ${3:Purpose} |"
+    ],
+    "description": "Dependency table row"
+  },
+  "Input Parameter": {
+    "prefix": "spec-input",
+    "body": [
+      "| ${1:param_name} | ${2|string,number,boolean,object,array|} | ${3|Yes,No|} | ${4:Description} |"
+    ],
+    "description": "Input parameter table row"
+  },
+  "Performance Target": {
+    "prefix": "spec-perf",
+    "body": [
+      "| ${1|p50,p95,p99,RPS,Memory|} | ${2:<100ms} |"
+    ],
+    "description": "Performance target table row"
+  },
+  "Acceptance Criterion": {
+    "prefix": "spec-accept",
+    "body": [
+      "- [ ] ${1:Acceptance criterion description}"
+    ],
+    "description": "Acceptance criterion checkbox"
+  },
+  "Same-As Reference": {
+    "prefix": "spec-sameas",
+    "body": [
+      "| ${1|security,testing,api,performance|} | ${2:../common} | ${3|replace,extend,merge|} |"
+    ],
+    "description": "Same-as reference for inheriting sections"
+  },
+  "Scoped Rule": {
+    "prefix": "spec-rule",
+    "body": [
+      "| ${1:RULE-001} | ${2:Rule Name} | ${3|security,testing,api,performance|} | ${4|error,warning,info|} |"
+    ],
+    "description": "Scoped rule definition"
+  }
+}
