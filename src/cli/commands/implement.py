@@ -27,6 +27,8 @@ console = Console()
 @click.option("--skip-security", is_flag=True, help="Skip security scan")
 @click.option("--skip-review", is_flag=True, help="Skip code review")
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+@click.option("--incremental", is_flag=True, help="Only regenerate changed sections")
+@click.option("--create-pr", is_flag=True, help="Create GitHub PR with generated code")
 @click.option(
     "--llm-model",
     default="claude-sonnet-4-20250514",
@@ -41,6 +43,8 @@ def implement(
     skip_security: bool,
     skip_review: bool,
     verbose: bool,
+    incremental: bool,
+    create_pr: bool,
     llm_model: str,
 ) -> None:
     """Run the full implementation pipeline for a specification.
