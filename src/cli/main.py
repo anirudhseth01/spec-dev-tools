@@ -22,6 +22,7 @@ from src.cli.commands.docs import docs_command
 from src.cli.commands.graph import graph_command, validate_cross_command
 from src.cli.commands.coverage import coverage_group
 from src.cli.commands.watch import watch_command
+from src.cli.commands.build import build
 
 
 @click.group()
@@ -67,6 +68,14 @@ def cli() -> None:
     VISUALIZATION:
       spec-dev graph                     Show dependency graph
       spec-dev coverage report           Generate coverage report
+
+    \b
+    BUILDER MODE:
+      spec-dev build start --name <name>   Start interactive design session
+      spec-dev build resume [session-id]   Resume a session
+      spec-dev build list                  List all sessions
+      spec-dev build approve <session-id>  Approve design and generate specs
+      spec-dev build execute <session-id>  Execute implementation
     """
     pass
 
@@ -96,6 +105,7 @@ cli.add_command(graph_command, name="graph")
 cli.add_command(validate_cross_command, name="validate-cross")
 cli.add_command(coverage_group, name="coverage")
 cli.add_command(watch_command, name="watch")
+cli.add_command(build)
 
 
 if __name__ == "__main__":
