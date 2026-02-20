@@ -430,22 +430,17 @@ def analyze_repo(session_id: str, repo_url: str, project_dir: str) -> None:
         console.print(f"[red]Session not found:[/red] {session_id}")
         raise SystemExit(1)
 
-    llm_client = _get_llm_client()
-    research_agent = ResearchAgent(llm_client, session.research_depth)
-    engine = DiscussionEngine(session, llm_client, research_agent)
+    # Note: We use llm_client=None for repo analysis to keep it fast
+    # The basic analysis still provides repo metadata and key files
+    research_agent = ResearchAgent(None, session.research_depth)
+    engine = DiscussionEngine(session, None, research_agent)
 
     console.print(f"\n[bold]Analyzing repository:[/bold] {repo_url}")
+    console.print("[dim]Fetching repository data...[/dim]")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Fetching repository data...", total=None)
+    result = asyncio.run(engine.add_reference_repo(repo_url))
 
-        result = asyncio.run(engine.add_reference_repo(repo_url))
-
-        progress.update(task, description="Analysis complete", completed=True)
+    console.print("[dim]Analysis complete.[/dim]")
 
     # Display results
     if result.action == DiscussionAction.ANALYZE_REPO:
