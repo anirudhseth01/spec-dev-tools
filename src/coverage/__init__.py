@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,35 @@ class ImplementationStatus(Enum):
     PARTIAL = "partial"
     COMPLETE = "complete"
     VERIFIED = "verified"
+
+
+class DefinitionType(Enum):
+    """Type of code definition extracted from spec."""
+    CLASS = "class"
+    DATACLASS = "dataclass"
+    ENUM = "enum"
+    FUNCTION = "function"
+    METHOD = "method"
+    CONSTANT = "constant"
+
+
+@dataclass
+class CodeDefinition:
+    """A code definition extracted from the spec."""
+    name: str
+    definition_type: DefinitionType
+    parent: str | None = None  # For methods, the class name
+    signature: str = ""  # Full signature for matching
+    source_section: str = ""  # Which spec section it came from
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "type": self.definition_type.value,
+            "parent": self.parent,
+            "signature": self.signature,
+            "source_section": self.source_section,
+        }
 
 
 @dataclass
@@ -61,13 +89,26 @@ class SpecCoverage:
     code_files: list[str] = field(default_factory=list)
     test_files: list[str] = field(default_factory=list)
     last_analyzed: datetime | None = None
+    # New: code definitions from spec
+    spec_definitions: list[CodeDefinition] = field(default_factory=list)
+    implemented_definitions: list[str] = field(default_factory=list)
+    missing_definitions: list[str] = field(default_factory=list)
+
+    @property
+    def definition_coverage(self) -> float:
+        """Calculate coverage based on spec definitions found in code."""
+        if not self.spec_definitions:
+            return 100.0  # No definitions to check
+        return (len(self.implemented_definitions) / len(self.spec_definitions)) * 100
 
     @property
     def overall_percentage(self) -> float:
         """Calculate overall coverage percentage."""
+        # Use definition coverage if we have definitions, else fallback to section-based
+        if self.spec_definitions:
+            return self.definition_coverage
         if not self.sections:
             return 0.0
-
         total = sum(s.percentage for s in self.sections.values())
         return total / len(self.sections)
 
@@ -94,10 +135,14 @@ class SpecCoverage:
             "spec_name": self.spec_name,
             "spec_path": self.spec_path,
             "overall_percentage": self.overall_percentage,
+            "definition_coverage": self.definition_coverage,
             "status": self.status.value,
             "sections": {k: v.to_dict() for k, v in self.sections.items()},
             "code_files": self.code_files,
             "test_files": self.test_files,
+            "spec_definitions": [d.to_dict() for d in self.spec_definitions],
+            "implemented_definitions": self.implemented_definitions,
+            "missing_definitions": self.missing_definitions,
             "last_analyzed": self.last_analyzed.isoformat() if self.last_analyzed else None,
         }
 
@@ -158,10 +203,13 @@ class CoverageTracker:
         coverage = SpecCoverage(
             spec_name=spec_name,
             spec_path=str(spec_path),
-            last_analyzed=datetime.now(),
+            last_analyzed=datetime.now(timezone.utc),
         )
 
-        # Analyze each section
+        # Extract code definitions from spec
+        coverage.spec_definitions = self._extract_code_definitions(content)
+
+        # Analyze each section (for backwards compatibility)
         for section_name in self.TRACKED_SECTIONS:
             section_cov = self._analyze_section(content, section_name)
             coverage.sections[section_name] = section_cov
@@ -170,7 +218,10 @@ class CoverageTracker:
         coverage.code_files = self._find_code_files(spec_name)
         coverage.test_files = self._find_test_files(spec_name)
 
-        # Check implementation status based on code files
+        # Check implementation status based on code definitions
+        self._check_code_definitions(coverage)
+
+        # Check implementation status based on code files (legacy)
         self._check_implementation(coverage)
 
         return coverage
@@ -188,6 +239,231 @@ class CoverageTracker:
             return spec_path
 
         return None
+
+    def _extract_code_definitions(self, content: str) -> list[CodeDefinition]:
+        """Extract code definitions from spec code blocks.
+
+        Parses Python code blocks in the spec to find:
+        - Class definitions (including dataclass, Enum)
+        - Function definitions
+        - Method definitions (within classes)
+        - Constants (UPPER_CASE assignments)
+        """
+        definitions: list[CodeDefinition] = []
+        seen: set[str] = set()  # Avoid duplicates
+
+        # Find all Python code blocks
+        code_blocks = re.findall(
+            r"```(?:python|py)?\n(.*?)```",
+            content,
+            re.DOTALL | re.IGNORECASE
+        )
+
+        # Track current section for context
+        sections = re.split(r"\n##+ ", content)
+        section_map: dict[int, str] = {}
+        pos = 0
+        for i, section in enumerate(sections):
+            section_map[pos] = section.split("\n")[0] if section else ""
+            pos += len(section) + 4  # Account for "\n## "
+
+        for code_block in code_blocks:
+            # Find which section this code block is in
+            block_pos = content.find(code_block)
+            current_section = ""
+            for start_pos, section_name in sorted(section_map.items()):
+                if start_pos <= block_pos:
+                    current_section = section_name
+
+            # Extract class definitions
+            class_matches = list(re.finditer(
+                r"^(@\w+(?:\([^)]*\))?\n)*class\s+(\w+)(?:\([^)]*\))?:",
+                code_block,
+                re.MULTILINE
+            ))
+
+            for i, match in enumerate(class_matches):
+                decorators = match.group(1) or ""
+                class_name = match.group(2)
+                full_match = match.group(0)
+
+                if class_name in seen:
+                    continue
+                seen.add(class_name)
+
+                # Determine type based on decorators
+                if "@dataclass" in decorators:
+                    def_type = DefinitionType.DATACLASS
+                elif "Enum" in full_match:
+                    def_type = DefinitionType.ENUM
+                else:
+                    def_type = DefinitionType.CLASS
+
+                definitions.append(CodeDefinition(
+                    name=class_name,
+                    definition_type=def_type,
+                    signature=full_match.strip(),
+                    source_section=current_section,
+                ))
+
+                # Extract methods from this class only (until next class or end)
+                class_start = match.end()
+                if i + 1 < len(class_matches):
+                    class_end = class_matches[i + 1].start()
+                else:
+                    class_end = len(code_block)
+
+                class_body = code_block[class_start:class_end]
+
+                # Only match methods that are indented (part of the class)
+                method_matches = re.finditer(
+                    r"^\s{4}(?:async\s+)?def\s+(\w+)\s*\([^)]*\)",
+                    class_body,
+                    re.MULTILINE
+                )
+                for method_match in method_matches:
+                    method_name = method_match.group(1)
+                    method_key = f"{class_name}.{method_name}"
+                    if method_key in seen:
+                        continue
+                    seen.add(method_key)
+
+                    definitions.append(CodeDefinition(
+                        name=method_name,
+                        definition_type=DefinitionType.METHOD,
+                        parent=class_name,
+                        signature=method_match.group(0).strip(),
+                        source_section=current_section,
+                    ))
+
+            # Extract top-level function definitions
+            func_matches = re.finditer(
+                r"^(?:async\s+)?def\s+(\w+)\s*\([^)]*\)",
+                code_block,
+                re.MULTILINE
+            )
+            for match in func_matches:
+                func_name = match.group(1)
+                # Skip if it's indented (method, not function)
+                line_start = code_block.rfind("\n", 0, match.start()) + 1
+                if line_start < match.start() and code_block[line_start:match.start()].strip() == "":
+                    # It's at the start of the line
+                    if func_name in seen:
+                        continue
+                    seen.add(func_name)
+
+                    definitions.append(CodeDefinition(
+                        name=func_name,
+                        definition_type=DefinitionType.FUNCTION,
+                        signature=match.group(0).strip(),
+                        source_section=current_section,
+                    ))
+
+            # Extract constants (UPPER_CASE = value at module level)
+            const_matches = re.finditer(
+                r"^([A-Z][A-Z0-9_]+)\s*[=:]",
+                code_block,
+                re.MULTILINE
+            )
+            for match in const_matches:
+                const_name = match.group(1)
+                if const_name in seen:
+                    continue
+                seen.add(const_name)
+
+                definitions.append(CodeDefinition(
+                    name=const_name,
+                    definition_type=DefinitionType.CONSTANT,
+                    signature=match.group(0).strip(),
+                    source_section=current_section,
+                ))
+
+        return definitions
+
+    def _check_code_definitions(self, coverage: SpecCoverage) -> None:
+        """Check which spec definitions are implemented in code files."""
+        if not coverage.spec_definitions:
+            return
+
+        # Read all code files into a single combined content for searching
+        all_code = ""
+        for code_file in coverage.code_files:
+            file_path = self.project_dir / code_file
+            if file_path.exists():
+                try:
+                    all_code += file_path.read_text() + "\n"
+                except Exception:
+                    pass
+
+        # Also read test files for test class definitions
+        for test_file in coverage.test_files:
+            file_path = self.project_dir / test_file
+            if file_path.exists():
+                try:
+                    all_code += file_path.read_text() + "\n"
+                except Exception:
+                    pass
+
+        if not all_code:
+            return
+
+        # Check each definition
+        for defn in coverage.spec_definitions:
+            found = False
+
+            if defn.definition_type == DefinitionType.CLASS:
+                # Look for class definition
+                pattern = rf"class\s+{re.escape(defn.name)}\s*[:\(]"
+                if re.search(pattern, all_code):
+                    found = True
+
+            elif defn.definition_type == DefinitionType.DATACLASS:
+                # Look for dataclass definition
+                pattern = rf"@dataclass.*\nclass\s+{re.escape(defn.name)}\s*[:\(]"
+                if re.search(pattern, all_code, re.DOTALL):
+                    found = True
+                # Also check for just class definition (might not use decorator)
+                elif re.search(rf"class\s+{re.escape(defn.name)}\s*[:\(]", all_code):
+                    found = True
+
+            elif defn.definition_type == DefinitionType.ENUM:
+                # Look for enum definition
+                pattern = rf"class\s+{re.escape(defn.name)}\s*\([^)]*Enum[^)]*\)"
+                if re.search(pattern, all_code):
+                    found = True
+
+            elif defn.definition_type == DefinitionType.FUNCTION:
+                # Look for function definition
+                pattern = rf"(?:async\s+)?def\s+{re.escape(defn.name)}\s*\("
+                if re.search(pattern, all_code):
+                    found = True
+
+            elif defn.definition_type == DefinitionType.METHOD:
+                # Look for method in the parent class
+                if defn.parent:
+                    # First find the class, then look for the method
+                    class_pattern = rf"class\s+{re.escape(defn.parent)}\s*[:\(]"
+                    class_match = re.search(class_pattern, all_code)
+                    if class_match:
+                        # Look for the method after the class definition
+                        remaining = all_code[class_match.end():]
+                        # Match method with optional decorators on preceding lines
+                        method_pattern = rf"(?:async\s+)?def\s+{re.escape(defn.name)}\s*\("
+                        if re.search(method_pattern, remaining[:10000]):  # Limit search scope
+                            found = True
+
+            elif defn.definition_type == DefinitionType.CONSTANT:
+                # Look for constant definition
+                pattern = rf"^{re.escape(defn.name)}\s*="
+                if re.search(pattern, all_code, re.MULTILINE):
+                    found = True
+
+            if found:
+                key = f"{defn.parent}.{defn.name}" if defn.parent else defn.name
+                coverage.implemented_definitions.append(key)
+            else:
+                key = f"{defn.parent}.{defn.name}" if defn.parent else defn.name
+                coverage.missing_definitions.append(key)
 
     def _analyze_section(self, content: str, section_name: str) -> SectionCoverage:
         """Analyze a single section."""

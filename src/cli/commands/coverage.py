@@ -91,8 +91,49 @@ def analyze_coverage(spec_name: str | None, specs_dir: str, code_dir: str | None
         console.print(f"Overall: {coverage.overall_percentage:.1f}%")
         console.print()
 
-        # Section details
-        table = Table(title="Section Coverage")
+        # Code definition coverage (primary metric)
+        if coverage.spec_definitions:
+            console.print(f"[bold]Code Definitions from Spec:[/bold]")
+            console.print(f"  Total definitions: {len(coverage.spec_definitions)}")
+            console.print(f"  [green]Implemented: {len(coverage.implemented_definitions)}[/green]")
+            console.print(f"  [red]Missing: {len(coverage.missing_definitions)}[/red]")
+            console.print(f"  Coverage: {coverage.definition_coverage:.1f}%")
+            console.print()
+
+            # Show definition details table
+            def_table = Table(title="Spec Definitions")
+            def_table.add_column("Name", style="cyan")
+            def_table.add_column("Type")
+            def_table.add_column("Status")
+            def_table.add_column("Section")
+
+            for defn in coverage.spec_definitions:
+                key = f"{defn.parent}.{defn.name}" if defn.parent else defn.name
+                if key in coverage.implemented_definitions:
+                    status = "[green]Implemented[/green]"
+                else:
+                    status = "[red]Missing[/red]"
+
+                def_table.add_row(
+                    key,
+                    defn.definition_type.value,
+                    status,
+                    defn.source_section[:30] if defn.source_section else "",
+                )
+
+            console.print(def_table)
+
+            # Show missing definitions
+            if coverage.missing_definitions:
+                console.print()
+                console.print("[bold red]Missing Definitions:[/bold red]")
+                for missing in coverage.missing_definitions[:20]:  # Limit output
+                    console.print(f"  - {missing}")
+                if len(coverage.missing_definitions) > 20:
+                    console.print(f"  ... and {len(coverage.missing_definitions) - 20} more")
+
+        # Section details (legacy, for backwards compatibility)
+        table = Table(title="Section Coverage (Legacy)")
         table.add_column("Section")
         table.add_column("Status")
         table.add_column("Items")
@@ -113,6 +154,7 @@ def analyze_coverage(spec_name: str | None, specs_dir: str, code_dir: str | None
                 f"{section.percentage:.1f}%",
             )
 
+        console.print()
         console.print(table)
 
         # Files
