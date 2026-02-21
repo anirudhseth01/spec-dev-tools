@@ -1,8 +1,11 @@
 """Main Streamlit app for Spec Builder Mode."""
 
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 import streamlit as st
 
@@ -40,7 +43,7 @@ def get_persistence() -> SessionPersistence:
     return SessionPersistence(st.session_state.project_path)
 
 
-def load_session(session_id: str) -> BuilderSession | None:
+def load_session(session_id: str) -> Optional[BuilderSession]:
     """Load a session by ID."""
     return get_persistence().load(session_id)
 
