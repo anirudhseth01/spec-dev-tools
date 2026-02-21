@@ -27,6 +27,9 @@ class TestGenerationConfig:
     mock_external_services: bool = True
     include_coverage_targets: bool = True
     max_retries: int = 2
+    # Coverage feedback loop settings
+    target_coverage: float = 80.0
+    focus_on_low_coverage: bool = True
 
 
 @dataclass
@@ -35,14 +38,16 @@ class TestGenerationState:
 
     unit_tests: list[GeneratedTest] = field(default_factory=list)
     edge_case_tests: list[GeneratedTest] = field(default_factory=list)
+    coverage_tests: list[GeneratedTest] = field(default_factory=list)
     fixtures: dict[str, str] = field(default_factory=dict)
     mocks: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    is_feedback_run: bool = False
 
     @property
     def all_tests(self) -> list[GeneratedTest]:
         """Get all generated tests."""
-        return self.unit_tests + self.edge_case_tests
+        return self.unit_tests + self.edge_case_tests + self.coverage_tests
 
     @property
     def total_test_count(self) -> int:
@@ -99,6 +104,12 @@ class TestGeneratorAgent(BaseAgent):
         try:
             # Reset state
             self.state = TestGenerationState()
+
+            # Check for feedback context (coverage improvement mode)
+            feedback_context = self._get_feedback_context(context)
+            if feedback_context:
+                self.state.is_feedback_run = True
+                return self._execute_coverage_improvement(context, feedback_context)
 
             # Detect or get language
             language = self._get_language(context)
@@ -213,6 +224,328 @@ class TestGeneratorAgent(BaseAgent):
                 message=str(e),
                 errors=[str(e)],
             )
+
+    def _get_feedback_context(self, context: AgentContext) -> Optional[dict]:
+        """Check for coverage feedback context from code review agent.
+
+        The orchestrator passes feedback when coverage is below threshold.
+        The feedback is stored as feedback_{agent_name} in artifacts.
+        """
+        if "artifacts" not in context.parent_context:
+            return None
+
+        artifacts = context.parent_context["artifacts"]
+
+        # Check for feedback artifact (set by orchestrator)
+        # Support both naming conventions
+        feedback_keys = [
+            f"feedback_{self.name}",
+            "feedback_testing_agent",
+            "feedback_test_generator_agent",
+        ]
+
+        for key in feedback_keys:
+            if key in artifacts:
+                feedback = artifacts[key]
+                if isinstance(feedback, dict) and "value" in feedback:
+                    return feedback["value"]
+                return feedback
+
+        return None
+
+    def _execute_coverage_improvement(
+        self,
+        context: AgentContext,
+        feedback: dict,
+    ) -> AgentResult:
+        """Execute test generation focused on improving coverage.
+
+        Args:
+            context: Agent context.
+            feedback: Feedback dict with low_coverage_files and target_coverage.
+        """
+        low_coverage_files = feedback.get("low_coverage_files", [])
+        target_coverage = feedback.get("target_coverage", self.config.target_coverage)
+        current_coverage = feedback.get("current_coverage", 0)
+
+        if not low_coverage_files:
+            return AgentResult(
+                status=AgentStatus.SKIPPED,
+                message="No low coverage files to improve",
+            )
+
+        # Detect language
+        language = self._get_language(context)
+        generator = self.generators.get(language)
+
+        # Get all code files
+        code_files = self._get_code_files(context)
+
+        # Focus on low coverage files
+        coverage_tests = []
+
+        for file_info in low_coverage_files:
+            file_path = file_info.get("file_path", "")
+            missing_lines = file_info.get("missing_lines", [])
+            file_coverage = file_info.get("coverage", 0)
+
+            if not file_path or not missing_lines:
+                continue
+
+            # Get the source code for this file
+            source_code = None
+            for code_path, content in code_files.items():
+                if code_path.endswith(file_path) or file_path.endswith(code_path):
+                    source_code = content
+                    break
+
+            if not source_code:
+                # Try to read from disk
+                full_path = context.project_root / file_path
+                if full_path.exists():
+                    try:
+                        source_code = full_path.read_text()
+                    except Exception:
+                        continue
+
+            if not source_code:
+                continue
+
+            # Generate tests for uncovered lines
+            tests = self._generate_coverage_tests(
+                generator=generator,
+                file_path=file_path,
+                source_code=source_code,
+                missing_lines=missing_lines,
+                file_coverage=file_coverage,
+                target_coverage=target_coverage,
+                context=context,
+            )
+            coverage_tests.extend(tests)
+
+        self.state.coverage_tests = coverage_tests
+
+        # Validate generated tests
+        invalid_tests = [t for t in coverage_tests if not t.is_valid]
+        if invalid_tests:
+            for test in invalid_tests:
+                for err in test.validation_errors:
+                    self.state.errors.append(f"{test.file_path}: {err}")
+
+        # Write files (unless dry run)
+        files_created = []
+        test_files = {}
+
+        for test in coverage_tests:
+            test_files[test.file_path] = test.content
+            if not self.dry_run:
+                full_path = context.project_root / test.file_path
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                full_path.write_text(test.content)
+                files_created.append(test.file_path)
+
+        return AgentResult(
+            status=AgentStatus.SUCCESS,
+            message=(
+                f"Generated {len(coverage_tests)} test files to improve coverage "
+                f"(current: {current_coverage:.1f}%, target: {target_coverage}%)"
+            ),
+            data={
+                "tests": test_files,
+                "files_created": files_created if files_created else list(test_files.keys()),
+                "coverage_test_count": len(coverage_tests),
+                "total_test_count": self.state.total_test_count,
+                "is_feedback_run": True,
+                "low_coverage_files_addressed": [f["file_path"] for f in low_coverage_files],
+                "language": language,
+                "test_framework": generator.test_framework,
+            },
+            files_created=files_created,
+        )
+
+    def _generate_coverage_tests(
+        self,
+        generator: BaseTestGenerator,
+        file_path: str,
+        source_code: str,
+        missing_lines: list[int],
+        file_coverage: float,
+        target_coverage: float,
+        context: AgentContext,
+    ) -> list[GeneratedTest]:
+        """Generate tests targeting specific uncovered lines."""
+        tests = []
+
+        if not self.llm:
+            # Template-based fallback
+            test_path = self._get_test_path(file_path, generator)
+            test_content = self._create_coverage_test_template(
+                file_path, missing_lines, generator
+            )
+            errors = generator.validate_test(test_content)
+            test_count = test_content.count("def test_") if generator.language == "python" else test_content.count("it(")
+
+            return [GeneratedTest(
+                file_path=test_path,
+                content=test_content,
+                test_framework=generator.test_framework,
+                language=generator.language,
+                test_count=test_count,
+                is_valid=len(errors) == 0,
+                validation_errors=errors,
+            )]
+
+        # Extract relevant code sections around missing lines
+        code_sections = self._extract_uncovered_sections(source_code, missing_lines)
+
+        prompt = f"""Generate {generator.test_framework} tests to improve code coverage.
+
+## Target File
+{file_path}
+
+## Current Coverage
+{file_coverage:.1f}% (target: {target_coverage}%)
+
+## Uncovered Lines
+Lines that need test coverage: {missing_lines[:20]}{'...' if len(missing_lines) > 20 else ''}
+
+## Code Sections Needing Coverage
+{code_sections}
+
+## Full Source Code
+```
+{source_code}
+```
+
+## Requirements
+- Focus on testing the uncovered lines
+- Test all code paths that lead to the uncovered lines
+- Include edge cases that exercise the uncovered branches
+- Use descriptive test names: test_<function>_<scenario>
+- Mock external dependencies
+- Ensure tests are independent
+
+Generate test file(s) to cover these lines:
+"""
+
+        system_prompt = generator.get_system_prompt()
+
+        for attempt in range(self.config.max_retries + 1):
+            response = self.llm.generate(
+                system_prompt=system_prompt,
+                user_prompt=prompt,
+            )
+
+            generated_tests = generator.parse_generated_tests(response.content)
+
+            if all(t.is_valid for t in generated_tests):
+                tests.extend(generated_tests)
+                break
+
+            if attempt < self.config.max_retries:
+                invalid_errors = []
+                for t in generated_tests:
+                    invalid_errors.extend(t.validation_errors)
+                prompt = f"""The previous test generation had syntax errors:
+{chr(10).join(invalid_errors)}
+
+Please regenerate with correct syntax:
+{prompt}
+"""
+            else:
+                tests.extend(generated_tests)
+
+        return tests
+
+    def _extract_uncovered_sections(
+        self,
+        source_code: str,
+        missing_lines: list[int],
+    ) -> str:
+        """Extract code sections around uncovered lines."""
+        lines = source_code.splitlines()
+        sections = []
+        context_lines = 3  # Lines before/after for context
+
+        # Group consecutive missing lines
+        groups = []
+        current_group = []
+
+        for line_num in sorted(missing_lines):
+            if not current_group or line_num <= current_group[-1] + 2:
+                current_group.append(line_num)
+            else:
+                groups.append(current_group)
+                current_group = [line_num]
+
+        if current_group:
+            groups.append(current_group)
+
+        # Extract each group with context
+        for group in groups[:5]:  # Limit to 5 groups
+            start = max(0, group[0] - context_lines - 1)
+            end = min(len(lines), group[-1] + context_lines)
+
+            section_lines = []
+            for i in range(start, end):
+                line_num = i + 1
+                marker = ">>> " if line_num in missing_lines else "    "
+                section_lines.append(f"{marker}{line_num:4d}: {lines[i]}")
+
+            sections.append("\n".join(section_lines))
+
+        return "\n\n---\n\n".join(sections)
+
+    def _create_coverage_test_template(
+        self,
+        file_path: str,
+        missing_lines: list[int],
+        generator: BaseTestGenerator,
+    ) -> str:
+        """Create a template for coverage tests (no LLM)."""
+        module_name = Path(file_path).stem
+
+        if generator.language == "python":
+            lines = [
+                f'"""Tests for improving coverage of {module_name}."""',
+                "",
+                "import pytest",
+                "from unittest.mock import MagicMock, patch",
+                "",
+                "",
+                f"class TestCoverage{module_name.title().replace('_', '')}:",
+                f'    """Tests targeting uncovered lines in {file_path}."""',
+                "",
+                f"    # Target lines: {missing_lines[:10]}{'...' if len(missing_lines) > 10 else ''}",
+                "",
+                "    def test_uncovered_branch_1(self):",
+                '        """Test for uncovered branch."""',
+                "        # TODO: Implement test for uncovered code",
+                "        pass",
+                "",
+                "    def test_uncovered_branch_2(self):",
+                '        """Test for another uncovered branch."""',
+                "        # TODO: Implement test for uncovered code",
+                "        pass",
+                "",
+            ]
+            return "\n".join(lines)
+        else:
+            return f"""// Tests for improving coverage of {module_name}
+// Target lines: {missing_lines[:10]}
+
+describe('{module_name} coverage', () => {{
+  it('covers uncovered branch 1', () => {{
+    // TODO: Implement test
+    expect(true).toBe(true);
+  }});
+
+  it('covers uncovered branch 2', () => {{
+    // TODO: Implement test
+    expect(true).toBe(true);
+  }});
+}});
+"""
 
     def _get_language(self, context: AgentContext) -> str:
         """Determine target language."""

@@ -38,7 +38,7 @@ class ReviewMode(Enum):
 
 
 class CodeReviewAgent(BaseAgent):
-    """Code review agent with multiple review modes.
+    """Code review agent with multiple review modes and coverage validation.
 
     Quick Mode (for rapid feedback):
     - Basic style checks
@@ -48,6 +48,7 @@ class CodeReviewAgent(BaseAgent):
     Standard Mode (default, for PRs):
     - All pattern-based checks
     - Style, best practices, spec compliance
+    - Test coverage validation
     - Medium execution (~30 seconds)
 
     Deep Mode (thorough review):
@@ -56,15 +57,21 @@ class CodeReviewAgent(BaseAgent):
     - Architecture concerns
     - Full review report (~2-5 minutes)
 
+    Coverage Feedback Loop:
+    - If test coverage < min_coverage (default 80%), sets needs_more_tests flag
+    - Orchestrator can use this to trigger TestGeneratorAgent to add more tests
+    - Supports iterative improvement up to max_coverage_iterations
+
     Design Decisions:
     - Spec-first: Primary focus is spec compliance
     - Modular: Uses pluggable checker system
     - Multi-severity: error/warning/suggestion levels
     - Actionable: Provides specific suggestions for improvements
+    - Coverage-aware: Validates test coverage and triggers feedback loop
     """
 
     name = "code_review_agent"
-    description = "Automated code quality reviewer"
+    description = "Automated code quality reviewer with coverage validation"
     requires = ["coding_agent"]  # Reviews code after generation
 
     def __init__(
@@ -75,6 +82,8 @@ class CodeReviewAgent(BaseAgent):
         file_extensions: list[str] | None = None,
         max_files: int = 50,
         fail_on_errors: bool = True,
+        min_coverage: float = 80.0,
+        enable_coverage_feedback: bool = True,
     ):
         """Initialize CodeReviewAgent.
 
@@ -85,6 +94,8 @@ class CodeReviewAgent(BaseAgent):
             file_extensions: File extensions to review.
             max_files: Maximum number of files to review.
             fail_on_errors: Whether to fail the agent on error-level findings.
+            min_coverage: Minimum test coverage percentage (0-100).
+            enable_coverage_feedback: Whether to enable coverage feedback loop.
         """
         if isinstance(mode, str):
             mode = ReviewMode(mode)
@@ -103,9 +114,11 @@ class CodeReviewAgent(BaseAgent):
         ]
         self.max_files = max_files
         self.fail_on_errors = fail_on_errors
+        self.min_coverage = min_coverage
+        self.enable_coverage_feedback = enable_coverage_feedback
 
     def execute(self, context: AgentContext) -> AgentResult:
-        """Execute code review."""
+        """Execute code review with coverage validation."""
         start_time = time.time()
 
         try:
@@ -134,6 +147,11 @@ class CodeReviewAgent(BaseAgent):
             if self.mode != ReviewMode.QUICK:
                 compliance_status = self.registry.get_compliance_status(review_context)
 
+            # Extract coverage results from review context
+            coverage_result = review_context.metadata.get("coverage_result", {})
+            needs_more_tests = coverage_result.get("needs_more_tests", False)
+            line_coverage = coverage_result.get("line_coverage", 0)
+
             # Build report
             duration_ms = int((time.time() - start_time) * 1000)
             report = ReviewReport(
@@ -144,7 +162,20 @@ class CodeReviewAgent(BaseAgent):
                 summary_notes=self._generate_summary_notes(comments, compliance_status),
             )
 
+            # Add coverage to summary notes
+            if coverage_result:
+                report.summary_notes.append(
+                    f"Test coverage: {line_coverage:.1f}% "
+                    f"(threshold: {self.min_coverage}%)"
+                )
+                if needs_more_tests:
+                    report.summary_notes.append(
+                        "Coverage below threshold - more tests needed"
+                    )
+
             # Determine status
+            # If coverage feedback is enabled and coverage is low, we return success
+            # but with needs_more_tests flag so orchestrator can trigger more tests
             if self.fail_on_errors and report.has_blocking_issues:
                 return AgentResult(
                     status=AgentStatus.FAILED,
@@ -155,6 +186,8 @@ class CodeReviewAgent(BaseAgent):
                         "has_blocking_issues": True,
                         "blocking_count": len(report.blocking_comments),
                         "review_report": report,
+                        "needs_more_tests": needs_more_tests,
+                        "coverage_result": coverage_result,
                     },
                     errors=[
                         f"{c.location}: {c.message}"
@@ -170,6 +203,9 @@ class CodeReviewAgent(BaseAgent):
                     "markdown_report": report.to_markdown(),
                     "has_blocking_issues": report.has_blocking_issues,
                     "review_report": report,
+                    "needs_more_tests": needs_more_tests,
+                    "coverage_result": coverage_result,
+                    "low_coverage_files": self._get_low_coverage_files(coverage_result),
                 },
             )
 
@@ -179,6 +215,25 @@ class CodeReviewAgent(BaseAgent):
                 message=f"Code review failed: {str(e)}",
                 errors=[str(e)],
             )
+
+    def _get_low_coverage_files(self, coverage_result: dict) -> list[dict]:
+        """Extract files with coverage below threshold."""
+        low_files = []
+        file_coverage = coverage_result.get("file_coverage", {})
+
+        for file_path, data in file_coverage.items():
+            pct = data.get("percent_covered", 0)
+            if pct < self.min_coverage:
+                low_files.append({
+                    "file_path": file_path,
+                    "coverage": pct,
+                    "missing_lines": data.get("missing_lines", []),
+                    "gap": self.min_coverage - pct,
+                })
+
+        # Sort by coverage gap (worst first)
+        low_files.sort(key=lambda x: x["gap"], reverse=True)
+        return low_files
 
     def _collect_files(self, context: AgentContext) -> dict[str, str]:
         """Collect files to review from context and artifacts."""

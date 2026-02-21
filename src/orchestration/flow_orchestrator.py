@@ -19,6 +19,7 @@ class FlowStrategy(Enum):
     SEQUENTIAL = "sequential"      # One after another
     PARALLEL_SIBLINGS = "parallel" # Same-level agents in parallel
     DAG = "dag"                    # Based on dependency graph
+    DAG_WITH_FEEDBACK = "dag_feedback"  # DAG with feedback loops
 
 
 @dataclass
@@ -43,6 +44,16 @@ class FlowMessage:
 
 
 @dataclass
+class FeedbackRequest:
+    """Request for feedback loop (re-run an agent with additional context)."""
+
+    from_agent: str
+    target_agent: str
+    reason: str
+    context: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class FlowState:
     """Current state of the execution flow."""
 
@@ -52,6 +63,8 @@ class FlowState:
     failed_agents: list[str] = field(default_factory=list)
     messages: list[FlowMessage] = field(default_factory=list)
     artifacts: dict[str, Any] = field(default_factory=dict)  # Shared artifacts
+    feedback_requests: list[FeedbackRequest] = field(default_factory=list)
+    iteration_counts: dict[str, int] = field(default_factory=dict)  # Track iterations per agent
 
     def can_run(self, agent_name: str, dependencies: list[str]) -> bool:
         """Check if an agent can run based on its dependencies."""
@@ -70,6 +83,31 @@ class FlowState:
         artifact = self.artifacts.get(key)
         return artifact["value"] if artifact else None
 
+    def request_feedback(
+        self,
+        from_agent: str,
+        target_agent: str,
+        reason: str,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        """Request a feedback loop to re-run an agent."""
+        self.feedback_requests.append(FeedbackRequest(
+            from_agent=from_agent,
+            target_agent=target_agent,
+            reason=reason,
+            context=context or {},
+        ))
+
+    def get_iteration_count(self, agent_name: str) -> int:
+        """Get current iteration count for an agent."""
+        return self.iteration_counts.get(agent_name, 0)
+
+    def increment_iteration(self, agent_name: str) -> int:
+        """Increment and return iteration count."""
+        current = self.iteration_counts.get(agent_name, 0)
+        self.iteration_counts[agent_name] = current + 1
+        return current + 1
+
 
 class FlowOrchestrator:
     """Orchestrates the flow of execution between multiple agents.
@@ -80,6 +118,12 @@ class FlowOrchestrator:
     - Artifact sharing (code, test results, etc.)
     - Error propagation and recovery
     - Section routing (giving agents only what they need)
+    - Feedback loops (re-run agents based on review results)
+
+    Feedback Loop Support:
+    - When CodeReviewAgent detects low coverage, it sets needs_more_tests=True
+    - Orchestrator detects this and triggers TestGeneratorAgent to add more tests
+    - Process repeats until coverage threshold is met or max_iterations reached
     """
 
     def __init__(
@@ -87,6 +131,8 @@ class FlowOrchestrator:
         spec: Spec,
         project_root: Path,
         strategy: FlowStrategy = FlowStrategy.SEQUENTIAL,
+        max_feedback_iterations: int = 3,
+        min_coverage: float = 80.0,
     ):
         """Initialize the orchestrator.
 
@@ -94,10 +140,14 @@ class FlowOrchestrator:
             spec: The specification being implemented.
             project_root: Root directory of the project.
             strategy: Execution strategy to use.
+            max_feedback_iterations: Maximum feedback loop iterations per agent.
+            min_coverage: Minimum test coverage threshold (0-100).
         """
         self.spec = spec
         self.project_root = Path(project_root)
         self.strategy = strategy
+        self.max_feedback_iterations = max_feedback_iterations
+        self.min_coverage = min_coverage
         self.section_router = SectionRouter()
         self.nodes: dict[str, AgentNode] = {}
         self.state = FlowState()
@@ -106,6 +156,7 @@ class FlowOrchestrator:
             "post_agent": [],
             "on_error": [],
             "on_complete": [],
+            "on_feedback": [],  # Called when feedback loop triggers
         }
 
     def register_agent(
@@ -151,6 +202,8 @@ class FlowOrchestrator:
             return self._execute_sequential()
         elif self.strategy == FlowStrategy.DAG:
             return self._execute_dag()
+        elif self.strategy == FlowStrategy.DAG_WITH_FEEDBACK:
+            return self._execute_dag_with_feedback()
         else:
             return self._execute_sequential()  # Fallback
 
@@ -201,6 +254,125 @@ class FlowOrchestrator:
 
         self._trigger_hooks("on_complete", self.state)
         return self.state
+
+    def _execute_dag_with_feedback(self) -> FlowState:
+        """Execute agents with feedback loop support.
+
+        After initial DAG execution, checks for feedback requests
+        (e.g., needs_more_tests from review agent) and re-runs
+        specified agents with additional context.
+        """
+        # First pass: normal DAG execution
+        levels = self._build_execution_levels()
+
+        for level in levels:
+            for agent_name in level:
+                node = self.nodes.get(agent_name)
+                if node and self.state.can_run(agent_name, node.depends_on):
+                    result = self._run_agent(node)
+
+                    # Check for feedback triggers after review agent
+                    if agent_name == "code_review_agent":
+                        self._check_coverage_feedback(result)
+
+                    if result.status == AgentStatus.FAILED:
+                        if not self._handle_failure(node, result):
+                            return self.state
+
+        # Process feedback loops
+        while self.state.feedback_requests:
+            feedback = self.state.feedback_requests.pop(0)
+            target_node = self.nodes.get(feedback.target_agent)
+
+            if not target_node:
+                continue
+
+            # Check iteration limit
+            iterations = self.state.get_iteration_count(feedback.target_agent)
+            if iterations >= self.max_feedback_iterations:
+                self._send_message(
+                    from_agent="orchestrator",
+                    to_agent=feedback.from_agent,
+                    message_type="feedback_limit",
+                    payload={
+                        "reason": f"Max iterations ({self.max_feedback_iterations}) reached",
+                        "target_agent": feedback.target_agent,
+                    },
+                )
+                continue
+
+            # Trigger feedback hook
+            self._trigger_hooks("on_feedback", feedback)
+
+            # Increment iteration and re-run the agent
+            self.state.increment_iteration(feedback.target_agent)
+
+            # Remove from completed to allow re-run
+            if feedback.target_agent in self.state.completed_agents:
+                self.state.completed_agents.remove(feedback.target_agent)
+            self.state.pending_agents.append(feedback.target_agent)
+
+            # Store feedback context for the agent
+            self.state.add_artifact(
+                f"feedback_{feedback.target_agent}",
+                feedback.context,
+                feedback.from_agent,
+            )
+
+            # Re-run the target agent
+            result = self._run_agent(target_node)
+
+            if result.status == AgentStatus.SUCCESS:
+                # Re-run the review agent to check if issue is resolved
+                review_node = self.nodes.get("code_review_agent")
+                if review_node and feedback.from_agent == "code_review_agent":
+                    # Remove review from completed
+                    if "code_review_agent" in self.state.completed_agents:
+                        self.state.completed_agents.remove("code_review_agent")
+                    self.state.pending_agents.append("code_review_agent")
+
+                    review_result = self._run_agent(review_node)
+                    self._check_coverage_feedback(review_result)
+
+        self._trigger_hooks("on_complete", self.state)
+        return self.state
+
+    def _check_coverage_feedback(self, result: AgentResult) -> None:
+        """Check if review result indicates need for more tests."""
+        if not result.is_success:
+            return
+
+        needs_more_tests = result.data.get("needs_more_tests", False)
+        coverage_result = result.data.get("coverage_result", {})
+        low_coverage_files = result.data.get("low_coverage_files", [])
+
+        if needs_more_tests:
+            line_coverage = coverage_result.get("line_coverage", 0)
+
+            # Check if we've already hit the limit
+            iterations = self.state.get_iteration_count("testing_agent")
+            alt_iterations = self.state.get_iteration_count("test_generator_agent")
+
+            if iterations < self.max_feedback_iterations or alt_iterations < self.max_feedback_iterations:
+                # Find the testing agent (could be named differently)
+                target_agent = None
+                if "testing_agent" in self.nodes:
+                    target_agent = "testing_agent"
+                elif "test_generator_agent" in self.nodes:
+                    target_agent = "test_generator_agent"
+
+                if target_agent:
+                    self.state.request_feedback(
+                        from_agent="code_review_agent",
+                        target_agent=target_agent,
+                        reason=f"Test coverage {line_coverage:.1f}% below threshold {self.min_coverage}%",
+                        context={
+                            "current_coverage": line_coverage,
+                            "target_coverage": self.min_coverage,
+                            "low_coverage_files": low_coverage_files,
+                            "iteration": iterations + 1,
+                        },
+                    )
 
     def _build_execution_levels(self) -> list[list[str]]:
         """Build levels for DAG execution (topological sort)."""
@@ -350,6 +522,9 @@ def create_standard_flow(
     spec: Spec,
     project_root: Path,
     agents: list[BaseAgent],
+    enable_coverage_feedback: bool = False,
+    min_coverage: float = 80.0,
+    max_feedback_iterations: int = 3,
 ) -> FlowOrchestrator:
     """Create a standard sequential flow with default dependencies.
 
@@ -363,11 +538,22 @@ def create_standard_flow(
         spec: The specification to implement.
         project_root: Root directory of the project.
         agents: List of agent instances to include in the flow.
+        enable_coverage_feedback: Enable coverage feedback loop.
+        min_coverage: Minimum test coverage threshold (0-100).
+        max_feedback_iterations: Maximum feedback iterations per agent.
 
     Returns:
         Configured FlowOrchestrator ready for execution.
     """
-    orchestrator = FlowOrchestrator(spec, project_root, FlowStrategy.DAG)
+    strategy = FlowStrategy.DAG_WITH_FEEDBACK if enable_coverage_feedback else FlowStrategy.DAG
+
+    orchestrator = FlowOrchestrator(
+        spec,
+        project_root,
+        strategy,
+        max_feedback_iterations=max_feedback_iterations,
+        min_coverage=min_coverage,
+    )
 
     for agent in agents:
         deps, provides = AGENT_DEPENDENCIES.get(agent.name, ([], []))
@@ -387,6 +573,9 @@ def create_flow_with_all_agents(
     security_agent: BaseAgent,
     test_generator_agent: BaseAgent,
     code_review_agent: BaseAgent,
+    enable_coverage_feedback: bool = True,
+    min_coverage: float = 80.0,
+    max_feedback_iterations: int = 3,
 ) -> FlowOrchestrator:
     """Create a flow with all standard agents configured with proper dependencies.
 
@@ -396,6 +585,12 @@ def create_flow_with_all_agents(
     - TestGeneratorAgent: Depends on coding_agent, provides tests and test_files
     - CodeReviewAgent: Depends on coding_agent and test agent, provides review
 
+    Coverage Feedback Loop (when enabled):
+    - After CodeReviewAgent runs, if coverage < min_coverage:
+      - Re-runs TestGeneratorAgent to add more tests
+      - Re-runs CodeReviewAgent to validate coverage
+      - Repeats up to max_feedback_iterations times
+
     Args:
         spec: The specification to implement.
         project_root: Root directory of the project.
@@ -403,11 +598,22 @@ def create_flow_with_all_agents(
         security_agent: SecurityScanAgent instance.
         test_generator_agent: TestGeneratorAgent instance.
         code_review_agent: CodeReviewAgent instance.
+        enable_coverage_feedback: Enable coverage feedback loop (default True).
+        min_coverage: Minimum test coverage threshold (default 80%).
+        max_feedback_iterations: Maximum feedback iterations (default 3).
 
     Returns:
         Configured FlowOrchestrator with all agents.
     """
-    orchestrator = FlowOrchestrator(spec, project_root, FlowStrategy.DAG)
+    strategy = FlowStrategy.DAG_WITH_FEEDBACK if enable_coverage_feedback else FlowStrategy.DAG
+
+    orchestrator = FlowOrchestrator(
+        spec,
+        project_root,
+        strategy,
+        max_feedback_iterations=max_feedback_iterations,
+        min_coverage=min_coverage,
+    )
 
     # Register CodingAgent (no dependencies, produces code)
     orchestrator.register_agent(
