@@ -20,14 +20,18 @@ def coverage_group():
 @coverage_group.command("analyze")
 @click.argument("spec_name", required=False)
 @click.option("--specs-dir", default="specs", help="Specs directory")
+@click.option("--code-dir", help="Implementation code directory")
+@click.option("--test-dir", help="Test files directory")
 @click.option("--all", "analyze_all", is_flag=True, help="Analyze all specs")
 @click.option("--save", is_flag=True, help="Save coverage data")
-def analyze_coverage(spec_name: str | None, specs_dir: str, analyze_all: bool, save: bool):
+def analyze_coverage(spec_name: str | None, specs_dir: str, code_dir: str | None, test_dir: str | None, analyze_all: bool, save: bool):
     """Analyze implementation coverage for a spec.
 
     Examples:
 
         spec-dev coverage analyze my-feature
+
+        spec-dev coverage analyze my-feature --code-dir src/my_feature
 
         spec-dev coverage analyze --all --save
     """
@@ -35,8 +39,10 @@ def analyze_coverage(spec_name: str | None, specs_dir: str, analyze_all: bool, s
 
     project_dir = Path.cwd()
     specs_path = Path(specs_dir)
+    code_path = Path(code_dir) if code_dir else None
+    test_path = Path(test_dir) if test_dir else None
 
-    tracker = CoverageTracker(project_dir, specs_path)
+    tracker = CoverageTracker(project_dir, specs_path, code_path, test_path)
 
     if analyze_all:
         all_coverage = tracker.get_all_coverage()

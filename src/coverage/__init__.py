@@ -118,15 +118,25 @@ class CoverageTracker:
         "12. Implementation",
     ]
 
-    def __init__(self, project_dir: Path, specs_dir: Path | None = None):
+    def __init__(
+        self,
+        project_dir: Path,
+        specs_dir: Path | None = None,
+        code_dir: Path | None = None,
+        test_dir: Path | None = None,
+    ):
         """Initialize coverage tracker.
 
         Args:
             project_dir: Root directory of the project.
             specs_dir: Directory containing specs.
+            code_dir: Directory containing implementation code.
+            test_dir: Directory containing test files.
         """
         self.project_dir = project_dir
         self.specs_dir = specs_dir or project_dir / "specs"
+        self.code_dir = code_dir  # If None, will search by name matching
+        self.test_dir = test_dir  # If None, will search by name matching
         self.coverage_file = project_dir / ".spec-dev" / "coverage.json"
 
     def analyze_spec(self, spec_name: str) -> SpecCoverage:
@@ -227,16 +237,33 @@ class CoverageTracker:
     def _find_code_files(self, spec_name: str) -> list[str]:
         """Find code files related to a spec."""
         code_files = []
+
+        # If code_dir is explicitly set, use all files in that directory
+        if self.code_dir:
+            search_dir = self.project_dir / self.code_dir
+            if search_dir.exists():
+                for py_file in search_dir.rglob("*.py"):
+                    if not py_file.name.startswith("__"):
+                        code_files.append(str(py_file.relative_to(self.project_dir)))
+                for ts_file in search_dir.rglob("*.ts"):
+                    code_files.append(str(ts_file.relative_to(self.project_dir)))
+            return code_files
+
+        # Otherwise, search by spec name matching
         spec_id = spec_name.replace("-", "_").lower()
+        # Also try just the last part of the path (e.g., "connector-sdk" -> "connector_sdk")
+        spec_short_id = spec_name.split("/")[-1].replace("-", "_").lower()
 
         # Search for matching Python files
         for py_file in self.project_dir.rglob("*.py"):
-            if spec_id in py_file.stem.lower():
+            stem_lower = py_file.stem.lower()
+            if spec_id in stem_lower or spec_short_id in str(py_file).lower():
                 code_files.append(str(py_file.relative_to(self.project_dir)))
 
         # Search for matching TypeScript files
         for ts_file in self.project_dir.rglob("*.ts"):
-            if spec_id in ts_file.stem.lower():
+            stem_lower = ts_file.stem.lower()
+            if spec_id in stem_lower or spec_short_id in str(ts_file).lower():
                 code_files.append(str(ts_file.relative_to(self.project_dir)))
 
         return code_files
@@ -244,15 +271,32 @@ class CoverageTracker:
     def _find_test_files(self, spec_name: str) -> list[str]:
         """Find test files related to a spec."""
         test_files = []
+
+        # If test_dir is explicitly set, use all test files in that directory
+        if self.test_dir:
+            search_dir = self.project_dir / self.test_dir
+            if search_dir.exists():
+                for test_file in search_dir.rglob("test_*.py"):
+                    test_files.append(str(test_file.relative_to(self.project_dir)))
+                for test_file in search_dir.rglob("*_test.py"):
+                    test_files.append(str(test_file.relative_to(self.project_dir)))
+                for test_file in search_dir.rglob("*.test.ts"):
+                    test_files.append(str(test_file.relative_to(self.project_dir)))
+            return test_files
+
+        # Otherwise, search by spec name matching
         spec_id = spec_name.replace("-", "_").lower()
+        spec_short_id = spec_name.split("/")[-1].replace("-", "_").lower()
 
         # Search for matching test files
         for test_file in self.project_dir.rglob("test_*.py"):
-            if spec_id in test_file.stem.lower():
+            stem_lower = test_file.stem.lower()
+            if spec_id in stem_lower or spec_short_id in str(test_file).lower():
                 test_files.append(str(test_file.relative_to(self.project_dir)))
 
         for test_file in self.project_dir.rglob("*.test.ts"):
-            if spec_id in test_file.stem.lower():
+            stem_lower = test_file.stem.lower()
+            if spec_id in stem_lower or spec_short_id in str(test_file).lower():
                 test_files.append(str(test_file.relative_to(self.project_dir)))
 
         return test_files
