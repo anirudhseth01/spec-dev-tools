@@ -449,7 +449,7 @@ class CoverageTracker:
                         remaining = all_code[class_match.end():]
                         # Match method with optional decorators on preceding lines
                         method_pattern = rf"(?:async\s+)?def\s+{re.escape(defn.name)}\s*\("
-                        if re.search(method_pattern, remaining[:10000]):  # Limit search scope
+                        if re.search(method_pattern, remaining[:50000]):  # Search up to ~500 lines
                             found = True
 
             elif defn.definition_type == DefinitionType.CONSTANT:
