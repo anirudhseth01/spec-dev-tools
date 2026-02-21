@@ -91,9 +91,11 @@ def generate(
         raise SystemExit(1)
 
     # Create config
+    # Note: TestGenerationConfig doesn't accept framework/coverage_target directly
+    # framework is passed to the agent and handled by language-specific generators
+    # coverage_target maps to include_coverage_targets (bool)
     config = TestGenerationConfig(
-        framework=framework,
-        coverage_target=coverage_target,
+        include_coverage_targets=(coverage_target > 0),
     )
 
     # Create agent

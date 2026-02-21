@@ -85,9 +85,11 @@ def review(
     llm_client = _get_llm_client(verbose)
 
     # Create agent
+    # Note: CodeReviewAgent uses fail_on_errors instead of strict_mode
+    # When strict=True, we fail on any blocking errors
     agent = CodeReviewAgent(
         llm_client=llm_client,
-        strict_mode=strict,
+        fail_on_errors=strict,
     )
 
     console.print(f"\n[bold]Code Review[/bold]")
@@ -143,7 +145,7 @@ def review(
         console.print(result)
 
     # Exit with error if blockers found
-    if report.has_blockers:
+    if report.has_blocking_issues:
         console.print(f"\n[red]Review found blocking issues![/red]")
         raise SystemExit(1)
 
@@ -235,11 +237,9 @@ def _collect_files(
 def _get_severity_style(severity: str) -> str:
     """Get rich style for severity level."""
     styles = {
-        "blocker": "bold red",
-        "major": "red",
-        "minor": "yellow",
+        "error": "bold red",
+        "warning": "yellow",
         "suggestion": "blue",
-        "praise": "green",
     }
     return styles.get(severity, "white")
 
@@ -250,70 +250,66 @@ def _display_text_report(report, verbose: bool) -> None:
     console.print("[bold]Code Review Results[/bold]")
     console.print("=" * 60)
 
-    # Summary
-    if report.overall_rating == "approved":
+    # Summary - use has_blocking_issues property
+    if not report.has_blocking_issues:
         status = "[green]APPROVED[/green]"
-    elif report.overall_rating == "changes_requested":
-        status = "[yellow]CHANGES REQUESTED[/yellow]"
-    else:
+    elif report.error_count > 0:
         status = "[red]NEEDS WORK[/red]"
+    else:
+        status = "[yellow]CHANGES REQUESTED[/yellow]"
 
     console.print(f"\nStatus: {status}")
     console.print(f"Files reviewed: {report.files_reviewed}")
-    console.print(f"Spec compliance: {report.spec_compliance_score:.0%}")
+    console.print(f"Spec compliance: {report.compliance_score:.0%}")
 
-    # Counts
+    # Counts - use error_count, warning_count, suggestion_count
     console.print(f"\nComments:")
-    console.print(f"  [bold red]Blockers:[/bold red] {report.blocker_count}")
-    console.print(f"  [red]Major:[/red] {report.major_count}")
-    console.print(f"  [yellow]Minor:[/yellow] {report.minor_count}")
+    console.print(f"  [bold red]Errors:[/bold red] {report.error_count}")
+    console.print(f"  [yellow]Warnings:[/yellow] {report.warning_count}")
+    console.print(f"  [blue]Suggestions:[/blue] {report.suggestion_count}")
 
-    # Show blockers
-    blockers = [c for c in report.comments if c.severity.value == "blocker"]
-    if blockers:
-        console.print("\n[bold red]Blocking Issues:[/bold red]")
-        for comment in blockers:
+    # Show errors (blocking issues)
+    errors = [c for c in report.comments if c.severity.value == "error"]
+    if errors:
+        console.print("\n[bold red]Errors (Blocking):[/bold red]")
+        for comment in errors:
             _display_comment(comment)
 
-    # Show major issues
-    major = [c for c in report.comments if c.severity.value == "major"]
-    if major:
-        console.print("\n[bold]Major Issues:[/bold]")
-        for comment in major:
+    # Show warnings
+    warnings = [c for c in report.comments if c.severity.value == "warning"]
+    if warnings:
+        console.print("\n[bold yellow]Warnings:[/bold yellow]")
+        for comment in warnings:
             _display_comment(comment)
 
-    # Show other issues if verbose
+    # Show suggestions if verbose
     if verbose:
-        other = [c for c in report.comments if c.severity.value in ("minor", "suggestion")]
-        if other:
-            console.print("\n[bold]Minor Issues & Suggestions:[/bold]")
+        suggestions = [c for c in report.comments if c.severity.value == "suggestion"]
+        if suggestions:
+            console.print("\n[bold]Suggestions:[/bold]")
             table = Table(show_header=True)
             table.add_column("Severity")
             table.add_column("Location")
             table.add_column("Category")
             table.add_column("Issue")
 
-            for comment in other:
+            for comment in suggestions:
                 severity_style = _get_severity_style(comment.severity.value)
                 location = comment.file_path
                 if comment.line_number:
                     location += f":{comment.line_number}"
 
+                # Use message instead of title
+                msg = comment.message[:40] if len(comment.message) > 40 else comment.message
+
                 table.add_row(
                     f"[{severity_style}]{comment.severity.value}[/{severity_style}]",
                     location[:40],
                     comment.category.value,
-                    comment.title[:40],
+                    msg,
                 )
 
             console.print(table)
-
-        # Show praise
-        praise = [c for c in report.comments if c.severity.value == "praise"]
-        if praise:
-            console.print("\n[bold green]Positive Feedback:[/bold green]")
-            for comment in praise:
-                console.print(f"  [green]+[/green] {comment.file_path}: {comment.title}")
 
 
 def _display_comment(comment) -> None:
@@ -324,13 +320,13 @@ def _display_comment(comment) -> None:
 
     severity_style = _get_severity_style(comment.severity.value)
 
-    content = f"[bold]{comment.title}[/bold]\n\n"
+    # Use message instead of title/description (ReviewComment has message, not title)
+    content = f"[bold]{comment.message}[/bold]\n\n"
     content += f"Location: {location}\n"
-    content += f"Category: {comment.category.value}\n\n"
-    content += comment.description
+    content += f"Category: {comment.category.value}\n"
 
     if comment.code_snippet:
-        content += f"\n\n```\n{comment.code_snippet}\n```"
+        content += f"\n```\n{comment.code_snippet}\n```"
 
     if comment.suggestion:
         content += f"\n\n[dim]Suggestion: {comment.suggestion}[/dim]"
