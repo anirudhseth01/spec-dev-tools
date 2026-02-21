@@ -20,6 +20,16 @@ from src.builder.discussion import DiscussionEngine, DiscussionAction
 from src.builder.research import ResearchAgent
 from src.builder.designer import BlockDesigner
 from src.builder.generator import SpecGenerator
+from src.llm.client import LLMClient, ClaudeCodeClient, ClaudeClient
+
+
+# Available models
+AVAILABLE_MODELS = {
+    "Claude Opus 4.6": "claude-opus-4-6-20250514",
+    "Claude Sonnet 4": "claude-sonnet-4-20250514",
+    "Claude Haiku 3.5": "claude-3-5-haiku-20241022",
+}
+DEFAULT_MODEL = "Claude Opus 4.6"
 
 
 # Page config
@@ -37,10 +47,36 @@ if "project_path" not in st.session_state:
 if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = None
 
+if "selected_model" not in st.session_state:
+    st.session_state.selected_model = DEFAULT_MODEL
+
+if "use_llm" not in st.session_state:
+    st.session_state.use_llm = True
+
 
 def get_persistence() -> SessionPersistence:
     """Get persistence instance."""
     return SessionPersistence(st.session_state.project_path)
+
+
+def get_llm_client() -> Optional[LLMClient]:
+    """Get LLM client based on selected model."""
+    if not st.session_state.use_llm:
+        return None
+
+    model_id = AVAILABLE_MODELS.get(st.session_state.selected_model)
+    if not model_id:
+        return None
+
+    try:
+        # Try Claude Code CLI first
+        return ClaudeCodeClient(model=model_id, timeout=120)
+    except Exception:
+        try:
+            # Fall back to API
+            return ClaudeClient(model=model_id)
+        except Exception:
+            return None
 
 
 def load_session(session_id: str) -> Optional[BuilderSession]:
@@ -58,6 +94,28 @@ def main():
     # Sidebar navigation
     with st.sidebar:
         st.title("🏗️ Spec Builder")
+        st.divider()
+
+        # Model selector
+        st.subheader("🤖 Model")
+        selected_model = st.selectbox(
+            "Select Model",
+            options=list(AVAILABLE_MODELS.keys()),
+            index=list(AVAILABLE_MODELS.keys()).index(st.session_state.selected_model),
+            label_visibility="collapsed",
+        )
+        if selected_model != st.session_state.selected_model:
+            st.session_state.selected_model = selected_model
+
+        use_llm = st.toggle("Enable LLM", value=st.session_state.use_llm, help="Use LLM for enhanced generation")
+        if use_llm != st.session_state.use_llm:
+            st.session_state.use_llm = use_llm
+
+        if st.session_state.use_llm:
+            st.caption(f"Using: `{AVAILABLE_MODELS[st.session_state.selected_model]}`")
+        else:
+            st.caption("Using rule-based fallbacks")
+
         st.divider()
 
         # Project path
@@ -249,8 +307,9 @@ def render_discussion_page():
             st.caption("🔬 Research-enabled topic")
 
         # Get or create discussion engine
-        research_agent = ResearchAgent(None, session.research_depth)
-        engine = DiscussionEngine(session, None, research_agent)
+        llm_client = get_llm_client()
+        research_agent = ResearchAgent(llm_client, session.research_depth)
+        engine = DiscussionEngine(session, llm_client, research_agent)
 
         # Check if we need to generate a question
         current_decision = None
@@ -370,7 +429,8 @@ def render_design_page():
 
         if st.button("Generate Hierarchy", type="primary"):
             with st.spinner("Designing block hierarchy from decisions..."):
-                designer = BlockDesigner(None)
+                llm_client = get_llm_client()
+                designer = BlockDesigner(llm_client)
                 hierarchy = asyncio.run(designer.design_hierarchy(session))
                 session.hierarchy_design = hierarchy
                 session.transition_to(SessionPhase.REVIEW)
@@ -420,7 +480,8 @@ def render_design_page():
     with col1:
         if st.button("✅ Approve & Generate Specs", type="primary", use_container_width=True):
             with st.spinner("Generating spec files..."):
-                generator = SpecGenerator(None)
+                llm_client = get_llm_client()
+                generator = SpecGenerator(llm_client)
                 specs = asyncio.run(generator.generate_all_specs(hierarchy, session))
                 created_files = asyncio.run(
                     generator.write_specs(specs, st.session_state.project_path)
@@ -533,8 +594,9 @@ def render_repos_page():
 
         if submitted and repo_url:
             with st.spinner("Analyzing repository..."):
-                research_agent = ResearchAgent(None, session.research_depth)
-                engine = DiscussionEngine(session, None, research_agent)
+                llm_client = get_llm_client()
+                research_agent = ResearchAgent(llm_client, session.research_depth)
+                engine = DiscussionEngine(session, llm_client, research_agent)
 
                 result = asyncio.run(engine.add_reference_repo(repo_url))
                 save_session(session)
