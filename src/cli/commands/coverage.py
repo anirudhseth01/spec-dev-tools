@@ -250,3 +250,190 @@ def coverage_status(specs_dir: str):
     console.print(f"[yellow]Partial: {status_counts[ImplementationStatus.PARTIAL]}[/yellow]")
     console.print(f"[green]Complete: {status_counts[ImplementationStatus.COMPLETE]}[/green]")
     console.print(f"[bold green]Verified: {status_counts[ImplementationStatus.VERIFIED]}[/bold green]")
+
+
+@coverage_group.command("test")
+@click.option("--source", "-s", help="Source directory to measure coverage for")
+@click.option("--tests", "-t", default="tests", help="Test directory")
+@click.option("--min-line", default=80, help="Minimum line coverage percentage")
+@click.option("--min-branch", default=70, help="Minimum branch coverage percentage")
+@click.option("--html", is_flag=True, help="Generate HTML coverage report")
+@click.option("--xml", is_flag=True, help="Generate XML coverage report (for CI)")
+@click.option("--fail-under", type=int, help="Fail if coverage is below this percentage")
+def test_coverage(
+    source: str | None,
+    tests: str,
+    min_line: int,
+    min_branch: int,
+    html: bool,
+    xml: bool,
+    fail_under: int | None,
+):
+    """Run tests and measure line/branch coverage.
+
+    Runs pytest with coverage and reports:
+    - Line coverage percentage
+    - Branch coverage percentage
+    - Uncovered lines per file
+
+    Examples:
+
+        spec-dev coverage test
+
+        spec-dev coverage test --source src/mypackage
+
+        spec-dev coverage test --min-line 90 --min-branch 80
+
+        spec-dev coverage test --html --fail-under 80
+    """
+    import json
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+
+    project_dir = Path.cwd()
+
+    # Find pytest executable
+    pytest_path = shutil.which("pytest")
+    if not pytest_path:
+        # Try using python -m pytest
+        pytest_cmd = [sys.executable, "-m", "pytest"]
+    else:
+        pytest_cmd = ["pytest"]
+
+    # Build pytest command
+    cmd = pytest_cmd + [tests, "-v"]
+
+    # Add coverage options
+    if source:
+        cmd.extend([f"--cov={source}"])
+    else:
+        # Try to find source directory
+        for candidate in ["src", "lib", project_dir.name]:
+            if (project_dir / candidate).is_dir():
+                cmd.extend([f"--cov={candidate}"])
+                source = candidate
+                break
+
+    # Always include branch coverage
+    cmd.append("--cov-branch")
+
+    # Generate JSON report for parsing
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        json_report = f.name
+
+    cmd.extend([f"--cov-report=json:{json_report}"])
+
+    # Optional HTML report
+    if html:
+        cmd.append("--cov-report=html")
+
+    # Optional XML report
+    if xml:
+        cmd.append("--cov-report=xml")
+
+    # Terminal report
+    cmd.append("--cov-report=term-missing")
+
+    # Fail under threshold
+    if fail_under:
+        cmd.extend([f"--cov-fail-under={fail_under}"])
+
+    console.print(f"[bold]Running tests with coverage...[/bold]")
+    console.print(f"Command: {' '.join(cmd)}")
+    console.print()
+
+    # Run pytest
+    result = subprocess.run(cmd, capture_output=False)
+
+    # Parse JSON report
+    try:
+        with open(json_report) as f:
+            cov_data = json.load(f)
+
+        totals = cov_data.get("totals", {})
+        line_coverage = totals.get("percent_covered", 0)
+        branch_coverage = totals.get("percent_covered_branches", 0) if "percent_covered_branches" in totals else None
+
+        console.print()
+        console.print("=" * 60)
+        console.print("[bold]Coverage Summary[/bold]")
+        console.print("=" * 60)
+
+        # Line coverage
+        line_style = "green" if line_coverage >= min_line else "red"
+        console.print(f"Line Coverage:   [{line_style}]{line_coverage:.1f}%[/{line_style}] (target: {min_line}%)")
+
+        # Branch coverage
+        if branch_coverage is not None:
+            branch_style = "green" if branch_coverage >= min_branch else "red"
+            console.print(f"Branch Coverage: [{branch_style}]{branch_coverage:.1f}%[/{branch_style}] (target: {min_branch}%)")
+
+        # File details
+        files = cov_data.get("files", {})
+        if files:
+            console.print()
+            console.print("[bold]Per-File Coverage:[/bold]")
+
+            file_table = Table()
+            file_table.add_column("File", style="cyan")
+            file_table.add_column("Lines", justify="right")
+            file_table.add_column("Miss", justify="right")
+            file_table.add_column("Branch", justify="right")
+            file_table.add_column("Cover", justify="right")
+            file_table.add_column("Missing Lines")
+
+            for filepath, data in sorted(files.items()):
+                summary = data.get("summary", {})
+                num_statements = summary.get("num_statements", 0)
+                missing_lines = summary.get("missing_lines", 0)
+                num_branches = summary.get("num_branches", 0)
+                pct = summary.get("percent_covered", 0)
+
+                # Get missing line numbers
+                missing = data.get("missing_lines", [])
+                missing_str = ", ".join(str(l) for l in missing[:5])
+                if len(missing) > 5:
+                    missing_str += f", +{len(missing) - 5} more"
+
+                pct_style = "green" if pct >= min_line else ("yellow" if pct >= min_line * 0.8 else "red")
+
+                file_table.add_row(
+                    filepath,
+                    str(num_statements),
+                    str(missing_lines),
+                    str(num_branches),
+                    f"[{pct_style}]{pct:.0f}%[/{pct_style}]",
+                    missing_str or "-",
+                )
+
+            console.print(file_table)
+
+        # Summary
+        console.print()
+        if line_coverage >= min_line and (branch_coverage is None or branch_coverage >= min_branch):
+            console.print("[bold green]Coverage targets met![/bold green]")
+        else:
+            console.print("[bold red]Coverage targets NOT met[/bold red]")
+            if line_coverage < min_line:
+                console.print(f"  Line coverage {line_coverage:.1f}% < {min_line}%")
+            if branch_coverage is not None and branch_coverage < min_branch:
+                console.print(f"  Branch coverage {branch_coverage:.1f}% < {min_branch}%")
+
+        if html:
+            console.print()
+            console.print("[dim]HTML report: htmlcov/index.html[/dim]")
+
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        console.print(f"[yellow]Could not parse coverage report: {e}[/yellow]")
+
+    finally:
+        # Cleanup temp file
+        try:
+            Path(json_report).unlink()
+        except Exception:
+            pass
+
+    # Exit with pytest's return code
+    raise SystemExit(result.returncode)
